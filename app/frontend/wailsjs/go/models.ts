@@ -82,10 +82,10 @@ export namespace config {
 	    }
 	}
 	export class FXConfig {
-	    ONNXRuntimeLibraryPath: string;
-	    ModelPath: string;
-	    Provider: string;
-	    DeviceID: number;
+	    SDKPath: string;
+	    ModelDir: string;
+	    EnableOSReleaseShim: boolean;
+	    BlurStrength: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new FXConfig(source);
@@ -93,10 +93,10 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ONNXRuntimeLibraryPath = source["ONNXRuntimeLibraryPath"];
-	        this.ModelPath = source["ModelPath"];
-	        this.Provider = source["Provider"];
-	        this.DeviceID = source["DeviceID"];
+	        this.SDKPath = source["SDKPath"];
+	        this.ModelDir = source["ModelDir"];
+	        this.EnableOSReleaseShim = source["EnableOSReleaseShim"];
+	        this.BlurStrength = source["BlurStrength"];
 	    }
 	}
 	export class LoopbackConfig {

@@ -5,35 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"nv-vcam/internal/config"
 )
-
-func TestDoctorFallsBackWhenConfiguredRuntimeIsMissing(t *testing.T) {
-	cfg := config.Default()
-	cfg.FX.ONNXRuntimeLibraryPath = filepath.Join(t.TempDir(), "missing.so")
-	result := Doctor(cfg)
-	if result.RuntimeLibraryPath == cfg.FX.ONNXRuntimeLibraryPath {
-		t.Fatal("expected doctor to resolve a fallback runtime path")
-	}
-	if result.Message == "" {
-		t.Fatal("expected diagnostic message")
-	}
-}
-
-func TestResolveRuntimeLibraryUsesConfiguredPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "libonnxruntime.so")
-	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ResolveRuntimeLibrary(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != path {
-		t.Fatalf("expected %q, got %q", path, got)
-	}
-}
 
 func TestMissingSharedLibrariesParsesLDDOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -44,10 +16,20 @@ func TestMissingSharedLibrariesParsesLDDOutput(t *testing.T) {
 	if err := os.WriteFile(fakeLDD, []byte("#!/usr/bin/env sh\ncat <<'EOF'\nlibcublasLt.so.12 => not found\nlibcudart.so.12 => not found\nlibc.so.6 => /usr/lib/libc.so.6\nEOF\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	oldPath := os.Getenv("PATH")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
-	missing := MissingSharedLibraries("/tmp/libonnxruntime_providers_cuda.so")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	env := os.Environ()
+	missing := MissingSharedLibraries("/tmp/libVideoFX.so", env)
 	if len(missing) != 2 || missing[0] != "libcublasLt.so.12" || missing[1] != "libcudart.so.12" {
 		t.Fatalf("unexpected missing libraries: %#v", missing)
+	}
+}
+
+func TestHelperValue(t *testing.T) {
+	output := "sdk_version=1.2.0\nmaxine_smoke_ok=true\n"
+	if got := helperValue(output, "sdk_version"); got != "1.2.0" {
+		t.Fatalf("expected sdk version, got %q", got)
+	}
+	if got := helperValue(output, "missing"); got != "" {
+		t.Fatalf("expected missing key to be empty, got %q", got)
 	}
 }

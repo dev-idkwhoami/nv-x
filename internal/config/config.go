@@ -50,10 +50,10 @@ type CaptureConfig struct {
 }
 
 type FXConfig struct {
-	ONNXRuntimeLibraryPath string
-	ModelPath              string
-	Provider               string
-	DeviceID               int
+	SDKPath             string
+	ModelDir            string
+	EnableOSReleaseShim bool
+	BlurStrength        float64
 }
 
 type ServiceConfig struct {
@@ -93,10 +93,10 @@ func Default() Config {
 			IdleLabel:          "nv-vcam idling ...",
 		},
 		FX: FXConfig{
-			ONNXRuntimeLibraryPath: "/usr/lib/libonnxruntime.so",
-			ModelPath:              "~/.local/share/nv-vcam/models/person-segmentation.onnx",
-			Provider:               "cuda",
-			DeviceID:               0,
+			SDKPath:             "/usr/local/VideoFX",
+			ModelDir:            "/usr/local/VideoFX/lib/models",
+			EnableOSReleaseShim: true,
+			BlurStrength:        0.75,
 		},
 		Service: ServiceConfig{
 			Name:     "nv-vcam.service",
@@ -169,10 +169,10 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "idle_timeout_seconds = %d\n", c.Capture.IdleTimeoutSeconds)
 	fmt.Fprintf(&b, "idle_label = %q\n\n", c.Capture.IdleLabel)
 	fmt.Fprintf(&b, "[fx]\n")
-	fmt.Fprintf(&b, "onnxruntime_library_path = %q\n", c.FX.ONNXRuntimeLibraryPath)
-	fmt.Fprintf(&b, "model_path = %q\n", c.FX.ModelPath)
-	fmt.Fprintf(&b, "provider = %q\n", c.FX.Provider)
-	fmt.Fprintf(&b, "device_id = %d\n\n", c.FX.DeviceID)
+	fmt.Fprintf(&b, "sdk_path = %q\n", c.FX.SDKPath)
+	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
+	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
+	fmt.Fprintf(&b, "blur_strength = %.2f\n\n", c.FX.BlurStrength)
 	fmt.Fprintf(&b, "[service]\n")
 	fmt.Fprintf(&b, "name = %q\n", c.Service.Name)
 	fmt.Fprintf(&b, "exec_path = %q\n\n", c.Service.ExecPath)
@@ -282,22 +282,25 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := parseString(raw)
 		cfg.Capture.IdleLabel = v
 		return err
-	case "fx.onnxruntime_library_path":
+	case "fx.sdk_path":
 		v, err := parseString(raw)
-		cfg.FX.ONNXRuntimeLibraryPath = v
+		cfg.FX.SDKPath = v
 		return err
-	case "fx.model_path":
+	case "fx.model_dir":
 		v, err := parseString(raw)
-		cfg.FX.ModelPath = v
+		cfg.FX.ModelDir = v
 		return err
-	case "fx.provider":
-		v, err := parseString(raw)
-		cfg.FX.Provider = v
+	case "fx.enable_os_release_shim":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.EnableOSReleaseShim = v
 		return err
-	case "fx.device_id":
-		v, err := strconv.Atoi(raw)
-		cfg.FX.DeviceID = v
+	case "fx.blur_strength":
+		v, err := strconv.ParseFloat(raw, 64)
+		cfg.FX.BlurStrength = v
 		return err
+	case "fx.onnxruntime_library_path", "fx.model_path", "fx.provider", "fx.device_id":
+		// Deprecated pre-Maxine keys are accepted so older config files keep loading.
+		return nil
 	case "service.name":
 		v, err := parseString(raw)
 		cfg.Service.Name = v

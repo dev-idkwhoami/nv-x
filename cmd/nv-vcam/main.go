@@ -70,7 +70,7 @@ func usage() {
   nv-vcam service install [--force] [--dry-run] [--enable] [--start]
   nv-vcam service start|stop|restart|status [--dry-run]
   nv-vcam fx doctor
-  nv-vcam fx test-image --input path --output path [--mask path]
+  nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--blur-strength value]
   nv-vcam run`)
 }
 
@@ -83,48 +83,64 @@ func fxCmd(args []string) error {
 		cfg := loadEffectiveConfig()
 		result := fx.Doctor(cfg)
 		fmt.Println("fx doctor")
-		fmt.Printf("onnxruntime: %s\n", result.RuntimeLibraryPath)
-		if result.CUDAProviderPath != "" {
-			fmt.Printf("cuda_provider: %s\n", result.CUDAProviderPath)
+		fmt.Printf("backend: maxine\n")
+		fmt.Printf("sdk_path: %s\n", result.SDKPath)
+		fmt.Printf("model_dir: %s\n", result.ModelDir)
+		fmt.Printf("helper: %s\n", result.HelperPath)
+		fmt.Printf("os_release_shim: %t\n", result.OSReleaseShim)
+		if result.ShimPath != "" {
+			fmt.Printf("shim: %s\n", result.ShimPath)
 		}
-		fmt.Printf("provider: %s\n", result.Provider)
-		fmt.Printf("device_id: %d\n", result.DeviceID)
-		fmt.Printf("runtime_ok: %t\n", result.RuntimeOK)
-		fmt.Printf("cuda_provider_ok: %t\n", result.CUDAProviderOK)
-		if len(result.MissingLibraries) > 0 {
-			fmt.Printf("missing_libraries: %s\n", strings.Join(result.MissingLibraries, ", "))
+		if result.SDKVersion != "" {
+			fmt.Printf("sdk_version: %s\n", result.SDKVersion)
 		}
-		fmt.Printf("model: %s\n", result.ModelPath)
-		fmt.Printf("model_exists: %t\n", result.ModelExists)
+		fmt.Printf("sdk_exists: %t\n", result.SDKExists)
+		fmt.Printf("features_ok: %t\n", result.FeaturesOK)
+		fmt.Printf("models_ok: %t\n", result.ModelsOK)
+		fmt.Printf("linker_ok: %t\n", result.LinkerOK)
+		fmt.Printf("helper_ok: %t\n", result.HelperOK)
+		for _, path := range result.MissingFiles {
+			fmt.Printf("missing_file: %s\n", path)
+		}
+		for _, lib := range result.MissingLibraries {
+			fmt.Printf("missing_library: %s\n", lib)
+		}
 		fmt.Printf("message: %s\n", result.Message)
-		if !result.RuntimeOK || (strings.EqualFold(result.Provider, "cuda") && !result.CUDAProviderOK) {
-			return errors.New("fx runtime check failed")
+		if !result.HelperOK {
+			return errors.New("Maxine FX runtime check failed")
 		}
 		return nil
 	case "test-image":
 		fs := flag.NewFlagSet("fx test-image", flag.ContinueOnError)
 		input := fs.String("input", "", "input image path")
-		output := fs.String("output", "", "output preview image path")
+		blurOutput := fs.String("blur-output", "", "background blur output image path")
+		removedOutput := fs.String("removed-output", "", "transparent background-removed output image path")
 		mask := fs.String("mask", "", "optional output mask image path")
+		blurStrength := fs.Float64("blur-strength", 0, "background blur strength")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		result, err := fx.RunTestImage(fx.TestImageOptions{
-			InputPath:  *input,
-			OutputPath: *output,
-			MaskPath:   *mask,
+		cfg := loadEffectiveConfig()
+		result, err := fx.RunTestImage(cfg, fx.TestImageOptions{
+			InputPath:    *input,
+			BlurPath:     *blurOutput,
+			RemovedPath:  *removedOutput,
+			MaskPath:     *mask,
+			BlurStrength: *blurStrength,
 		})
 		if err != nil {
 			return err
 		}
 		fmt.Printf("fx test-image completed\n")
 		fmt.Printf("input: %s\n", result.InputPath)
-		fmt.Printf("output: %s\n", result.OutputPath)
+		fmt.Printf("blur_output: %s\n", result.BlurPath)
+		fmt.Printf("removed_output: %s\n", result.RemovedPath)
 		if result.MaskPath != "" {
 			fmt.Printf("mask: %s\n", result.MaskPath)
 		}
 		fmt.Printf("size: %dx%d\n", result.Width, result.Height)
 		fmt.Printf("runtime: %s\n", result.Runtime)
+		fmt.Printf("blur_strength: %.2f\n", result.BlurStrength)
 		return nil
 	default:
 		return fmt.Errorf("unknown fx command %q", args[0])

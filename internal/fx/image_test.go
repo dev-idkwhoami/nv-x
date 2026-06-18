@@ -6,60 +6,64 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"nv-vcam/internal/config"
 )
 
-func TestRunTestImageWritesOutputAndMask(t *testing.T) {
-	dir := t.TempDir()
-	input := filepath.Join(dir, "input.png")
-	output := filepath.Join(dir, "out.png")
-	mask := filepath.Join(dir, "mask.png")
-	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 64; x++ {
-			img.SetRGBA(x, y, color.RGBA{R: uint8(x * 3), G: uint8(y * 4), B: 120, A: 255})
-		}
+func TestRunTestImageRequiresInputAndOutputs(t *testing.T) {
+	cfg := config.Default()
+	if _, err := RunTestImage(cfg, TestImageOptions{}); err == nil {
+		t.Fatal("expected missing input error")
 	}
-	if err := SaveImage(input, img); err != nil {
+	if _, err := RunTestImage(cfg, TestImageOptions{InputPath: "missing.png"}); err == nil {
+		t.Fatal("expected missing blur output error")
+	}
+	if _, err := RunTestImage(cfg, TestImageOptions{InputPath: "missing.png", BlurPath: "blur.png"}); err == nil {
+		t.Fatal("expected missing removed output error")
+	}
+}
+
+func TestPPMRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.ppm")
+	src := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	src.SetRGBA(0, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})
+	src.SetRGBA(1, 0, color.RGBA{R: 40, G: 50, B: 60, A: 255})
+	src.SetRGBA(0, 1, color.RGBA{R: 70, G: 80, B: 90, A: 255})
+	src.SetRGBA(1, 1, color.RGBA{R: 100, G: 110, B: 120, A: 255})
+	if err := WritePPM(path, src); err != nil {
 		t.Fatal(err)
 	}
-
-	result, err := RunTestImage(TestImageOptions{
-		InputPath:  input,
-		OutputPath: output,
-		MaskPath:   mask,
-	})
+	got, err := ReadPPM(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Width != 64 || result.Height != 48 || result.Runtime != "placeholder-cpu" {
-		t.Fatalf("unexpected result: %+v", result)
+	if got.Bounds().Dx() != 2 || got.Bounds().Dy() != 2 {
+		t.Fatalf("unexpected bounds: %v", got.Bounds())
 	}
-	for _, path := range []string{output, mask} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("expected %s to exist: %v", path, err)
-		}
-		if info.Size() == 0 {
-			t.Fatalf("expected %s to be non-empty", path)
-		}
+	if c := got.RGBAAt(1, 1); c.R != 100 || c.G != 110 || c.B != 120 || c.A != 255 {
+		t.Fatalf("unexpected pixel: %+v", c)
 	}
 }
 
-func TestRunTestImageRequiresInputAndOutput(t *testing.T) {
-	if _, err := RunTestImage(TestImageOptions{}); err == nil {
-		t.Fatal("expected missing input error")
+func TestReadPGMAndCompositeTransparent(t *testing.T) {
+	dir := t.TempDir()
+	maskPath := filepath.Join(dir, "mask.pgm")
+	if err := os.WriteFile(maskPath, []byte("P5\n2 1\n255\n\x00\xff"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := RunTestImage(TestImageOptions{InputPath: "missing.png"}); err == nil {
-		t.Fatal("expected missing output error")
+	mask, err := ReadPGM(maskPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestPlaceholderPersonMaskHasForeground(t *testing.T) {
-	mask := PlaceholderPersonMask(80, 60)
-	if mask.GrayAt(40, 20).Y == 0 {
-		t.Fatal("expected head region to be foreground")
+	src := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	src.SetRGBA(0, 0, color.RGBA{R: 10, G: 20, B: 30, A: 255})
+	src.SetRGBA(1, 0, color.RGBA{R: 40, G: 50, B: 60, A: 255})
+	out := CompositeTransparent(src, mask)
+	if out.RGBAAt(0, 0).A != 0 {
+		t.Fatalf("expected first pixel transparent, got %+v", out.RGBAAt(0, 0))
 	}
-	if mask.GrayAt(0, 0).Y != 0 {
-		t.Fatal("expected corner to be background")
+	if out.RGBAAt(1, 0).A != 255 {
+		t.Fatalf("expected second pixel opaque, got %+v", out.RGBAAt(1, 0))
 	}
 }

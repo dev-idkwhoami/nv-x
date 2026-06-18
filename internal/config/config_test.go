@@ -24,8 +24,10 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`exclusive_caps = true`,
 		`input_command = "gphoto2 --stdout --capture-movie"`,
 		`idle_label = "nv-vcam idling ..."`,
-		`onnxruntime_library_path = "/usr/lib/libonnxruntime.so"`,
-		`provider = "cuda"`,
+		`sdk_path = "/usr/local/VideoFX"`,
+		`model_dir = "/usr/local/VideoFX/lib/models"`,
+		`enable_os_release_shim = true`,
+		`blur_strength = 0.75`,
 		`theme = "system"`,
 	} {
 		if !strings.Contains(rendered, want) {
@@ -46,8 +48,21 @@ func TestRenderAndParseDefault(t *testing.T) {
 	if !parsed.Capture.Enabled || parsed.Capture.Device != "/dev/video10" || parsed.Capture.Width != 2560 {
 		t.Fatalf("unexpected parsed capture config: %+v", parsed.Capture)
 	}
-	if parsed.FX.Provider != "cuda" || parsed.FX.DeviceID != 0 {
+	if parsed.FX.SDKPath != "/usr/local/VideoFX" || parsed.FX.ModelDir != "/usr/local/VideoFX/lib/models" || !parsed.FX.EnableOSReleaseShim || parsed.FX.BlurStrength != 0.75 {
 		t.Fatalf("unexpected parsed fx config: %+v", parsed.FX)
+	}
+}
+
+func TestParseAcceptsDeprecatedONNXKeys(t *testing.T) {
+	rendered := Render(Default()) + `
+[fx]
+onnxruntime_library_path = "/tmp/libonnxruntime.so"
+model_path = "/tmp/model.onnx"
+provider = "cuda"
+device_id = 0
+`
+	if _, err := Parse([]byte(rendered)); err != nil {
+		t.Fatalf("expected deprecated fx keys to be ignored, got %v", err)
 	}
 }
 

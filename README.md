@@ -2,7 +2,7 @@
 
 `nv-vcam` is a native Linux "NVIDIA Broadcast-lite" virtual camera manager and effects service.
 
-The current milestone is v0.1.0 RAW-first: a Go CLI and Wails app that manage config files, inspect camera devices, write safe `v4l2loopback` configuration, control a systemd user service, and supervise a Sony RAW capture pipeline. FX processing is planned after the RAW path is reliable.
+The current milestone is v0.1.0 RAW-first plus early Maxine FX validation: a Go CLI and Wails app that manage config files, inspect camera devices, write safe `v4l2loopback` configuration, control a systemd user service, supervise a Sony RAW capture pipeline, and validate NVIDIA Maxine still-image effects before realtime video integration.
 
 ## Current Milestone
 
@@ -10,7 +10,8 @@ The current milestone is v0.1.0 RAW-first: a Go CLI and Wails app that manage co
 - Go service packages and CLI under the root module.
 - Wails desktop app under `app/`.
 - RAW Sony capture supervision through `gphoto2` and `ffmpeg`.
-- No AI blur or realtime processing yet.
+- No realtime FX streaming yet.
+- Maxine FX validation is available for still images only.
 
 ## Intended Topology
 
@@ -27,9 +28,8 @@ The current working flow targets `/dev/video10` as the RAW camera. The service k
 
 ## Non-goals For This Milestone
 
-- No NVIDIA Maxine.
-- No ONNX, CUDA, TensorRT, OpenCV, or RNNoise integration.
-- No realtime background blur or replacement yet.
+- No ONNX, OpenCV, or RNNoise integration.
+- No realtime background blur or replacement service yet.
 - No GUI camera preview yet; validate feeds in a real browser or video app.
 - No Docker.
 - No Python.
@@ -42,7 +42,8 @@ Runtime:
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - `gphoto2` for Sony camera capture.
 - `ffmpeg` with V4L2 output support.
-- `onnxruntime-cuda` for FX model inference on CUDA.
+- NVIDIA Maxine Video Effects SDK Core installed under `/usr/local/VideoFX` for FX validation.
+- Maxine features: GreenScreen, BackgroundBlur, and Denoising packages. The current CLI uses GreenScreen and BackgroundBlur; Denoising is installed for later video work.
 - `pkexec`/polkit for GUI loopback write/reload elevation.
 - `fuser` from `psmisc` is optional but useful for troubleshooting busy devices.
 
@@ -56,7 +57,7 @@ Build:
 Arch/CachyOS package names are typically:
 
 ```bash
-sudo pacman -S --needed go bun ffmpeg gphoto2 v4l2loopback-dkms psmisc polkit onnxruntime-cuda
+sudo pacman -S --needed go bun ffmpeg gphoto2 v4l2loopback-dkms psmisc polkit gcc
 ```
 
 Install the kernel headers that match `uname -r`; on CachyOS this may be a CachyOS-specific headers package rather than plain `linux-headers`.
@@ -69,6 +70,8 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
 Make sure `$(go env GOPATH)/bin` is in `PATH` so `wails` can be found.
 
+Install NVIDIA Maxine from NGC into `/usr/local/VideoFX` before using `nv-vcam fx doctor` or `nv-vcam fx test-image`. The NGC API key is only needed to download the SDK/model artifacts; the effects run locally.
+
 ## Build And Install
 
 ```bash
@@ -77,7 +80,7 @@ make build
 make install
 ```
 
-`make install` installs the CLI/service binary to `~/.local/bin/nv-vcam`. Make sure `~/.local/bin` is in your shell `PATH` if you want to run `nv-vcam` directly.
+`make install` installs the CLI/service binary to `~/.local/bin/nv-vcam`, the Maxine helper to `~/.local/bin/nv-vcam-maxine-helper`, and the CachyOS/Arch compatibility shim to `~/.local/lib/nv-vcam/nv-vcam-os-release-shim.so`. Make sure `~/.local/bin` is in your shell `PATH` if you want to run `nv-vcam` directly.
 
 ```bash
 nv-vcam config write
@@ -111,10 +114,20 @@ The `features/camera-fx` branch starts FX work with a still-image command before
 
 ```bash
 nv-vcam fx doctor
-nv-vcam fx test-image --input ./input.jpg --output ./out.png --mask ./mask.png
+nv-vcam fx test-image --input ./input.jpg --blur-output ./blur.png --removed-output ./removed.png --mask ./mask.png
 ```
 
-`nv-vcam fx doctor` validates the ONNX Runtime shared library and CUDA execution provider without loading a model. `nv-vcam fx test-image` currently validates image loading, mask output, and compositing paths with a deterministic placeholder CPU mask. Real model inference is the next step after the runtime check is green.
+`nv-vcam fx doctor` validates the Maxine SDK layout, shared library dependencies, helper binary, CachyOS/Arch compatibility shim, TensorRT model files, and a synthetic GreenScreen/BackgroundBlur smoke test.
+
+`nv-vcam fx test-image` runs Maxine GreenScreen and BackgroundBlur on a still image. It writes:
+
+- `--blur-output`: a PNG/JPEG with the original foreground and Maxine-blurred background.
+- `--removed-output`: a PNG/JPEG where the background is transparent.
+- `--mask`: optional grayscale segmentation mask.
+
+On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-vcam` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.
+
+Realtime FX streaming is intentionally not wired yet. The still-image commands are the validation step before connecting Maxine to `/dev/video10 -> /dev/video20`.
 
 ## RAW Capture Service
 
