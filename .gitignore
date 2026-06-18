@@ -1,0 +1,23 @@
+# Local build artifacts
+/bin/
+/nv-vcam
+/app/build/bin/
+/app/frontend/dist/
+
+# Dependencies and package-manager caches
+/app/frontend/node_modules/
+/.bun/
+/.cache/
+
+# Local test utilities
+/camera-test.html
+
+# OS/editor noise
+.DS_Store
+*.swp
+*~
+/app/frontend/.vscode/
+
+# Logs and runtime state
+*.log
+*.pid
