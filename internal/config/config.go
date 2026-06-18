@@ -15,6 +15,7 @@ type Config struct {
 	Output   OutputConfig
 	Loopback LoopbackConfig
 	Capture  CaptureConfig
+	FX       FXConfig
 	Service  ServiceConfig
 	UI       UIConfig
 }
@@ -46,6 +47,25 @@ type CaptureConfig struct {
 	UseCUDAScale       bool
 	IdleTimeoutSeconds int
 	IdleLabel          string
+}
+
+type FXConfig struct {
+	Enabled             bool
+	IdleEnabled         bool
+	InputDevice         string
+	OutputDevice        string
+	Width               int
+	Height              int
+	FPS                 int
+	BackgroundMode      string
+	BackgroundImage     string
+	ChromaColor         string
+	SDKPath             string
+	ModelDir            string
+	EnableOSReleaseShim bool
+	BlurStrength        float64
+	DenoiseEnabled      bool
+	DenoiseStrength     int
 }
 
 type ServiceConfig struct {
@@ -83,6 +103,24 @@ func Default() Config {
 			UseCUDAScale:       true,
 			IdleTimeoutSeconds: 15,
 			IdleLabel:          "nv-vcam idling ...",
+		},
+		FX: FXConfig{
+			Enabled:             true,
+			IdleEnabled:         true,
+			InputDevice:         "/dev/video10",
+			OutputDevice:        "/dev/video20",
+			Width:               2560,
+			Height:              1440,
+			FPS:                 25,
+			BackgroundMode:      "blur",
+			BackgroundImage:     "",
+			ChromaColor:         "#00ff00",
+			SDKPath:             "/usr/local/VideoFX",
+			ModelDir:            "/usr/local/VideoFX/lib/models",
+			EnableOSReleaseShim: true,
+			BlurStrength:        0.75,
+			DenoiseEnabled:      false,
+			DenoiseStrength:     0,
 		},
 		Service: ServiceConfig{
 			Name:     "nv-vcam.service",
@@ -154,6 +192,23 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "use_cuda_scale = %t\n", c.Capture.UseCUDAScale)
 	fmt.Fprintf(&b, "idle_timeout_seconds = %d\n", c.Capture.IdleTimeoutSeconds)
 	fmt.Fprintf(&b, "idle_label = %q\n\n", c.Capture.IdleLabel)
+	fmt.Fprintf(&b, "[fx]\n")
+	fmt.Fprintf(&b, "enabled = %t\n", c.FX.Enabled)
+	fmt.Fprintf(&b, "idle_enabled = %t\n", c.FX.IdleEnabled)
+	fmt.Fprintf(&b, "input_device = %q\n", c.FX.InputDevice)
+	fmt.Fprintf(&b, "output_device = %q\n", c.FX.OutputDevice)
+	fmt.Fprintf(&b, "width = %d\n", c.FX.Width)
+	fmt.Fprintf(&b, "height = %d\n", c.FX.Height)
+	fmt.Fprintf(&b, "fps = %d\n", c.FX.FPS)
+	fmt.Fprintf(&b, "background_mode = %q\n", c.FX.BackgroundMode)
+	fmt.Fprintf(&b, "background_image = %q\n", c.FX.BackgroundImage)
+	fmt.Fprintf(&b, "chroma_color = %q\n", c.FX.ChromaColor)
+	fmt.Fprintf(&b, "sdk_path = %q\n", c.FX.SDKPath)
+	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
+	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
+	fmt.Fprintf(&b, "blur_strength = %.2f\n", c.FX.BlurStrength)
+	fmt.Fprintf(&b, "denoise_enabled = %t\n", c.FX.DenoiseEnabled)
+	fmt.Fprintf(&b, "denoise_strength = %d\n\n", c.FX.DenoiseStrength)
 	fmt.Fprintf(&b, "[service]\n")
 	fmt.Fprintf(&b, "name = %q\n", c.Service.Name)
 	fmt.Fprintf(&b, "exec_path = %q\n\n", c.Service.ExecPath)
@@ -263,6 +318,91 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := parseString(raw)
 		cfg.Capture.IdleLabel = v
 		return err
+	case "fx.enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.Enabled = v
+		return err
+	case "fx.idle_enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.IdleEnabled = v
+		return err
+	case "fx.input_device":
+		v, err := parseString(raw)
+		cfg.FX.InputDevice = v
+		return err
+	case "fx.output_device":
+		v, err := parseString(raw)
+		cfg.FX.OutputDevice = v
+		return err
+	case "fx.width":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.Width = v
+		return err
+	case "fx.height":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.Height = v
+		return err
+	case "fx.fps":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.FPS = v
+		return err
+	case "fx.background_mode":
+		v, err := parseString(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateBackgroundMode(v); err != nil {
+			return err
+		}
+		cfg.FX.BackgroundMode = v
+		return nil
+	case "fx.background_image":
+		v, err := parseString(raw)
+		cfg.FX.BackgroundImage = v
+		return err
+	case "fx.chroma_color":
+		v, err := parseString(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateChromaColor(v); err != nil {
+			return err
+		}
+		cfg.FX.ChromaColor = v
+		return nil
+	case "fx.sdk_path":
+		v, err := parseString(raw)
+		cfg.FX.SDKPath = v
+		return err
+	case "fx.model_dir":
+		v, err := parseString(raw)
+		cfg.FX.ModelDir = v
+		return err
+	case "fx.enable_os_release_shim":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.EnableOSReleaseShim = v
+		return err
+	case "fx.blur_strength":
+		v, err := strconv.ParseFloat(raw, 64)
+		cfg.FX.BlurStrength = v
+		return err
+	case "fx.denoise_enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.DenoiseEnabled = v
+		return err
+	case "fx.denoise_strength":
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		if v != 0 && v != 1 {
+			return fmt.Errorf("invalid fx denoise_strength %d: expected 0 or 1", v)
+		}
+		cfg.FX.DenoiseStrength = v
+		return nil
+	case "fx.onnxruntime_library_path", "fx.model_path", "fx.provider", "fx.device_id":
+		// Deprecated pre-Maxine keys are accepted so older config files keep loading.
+		return nil
 	case "service.name":
 		v, err := parseString(raw)
 		cfg.Service.Name = v
@@ -284,6 +424,27 @@ func assign(cfg *Config, section, key, raw string) error {
 	default:
 		return fmt.Errorf("unknown key %q in section %q", key, section)
 	}
+}
+
+func ValidateBackgroundMode(mode string) error {
+	switch mode {
+	case "blur", "mask", "replace", "chroma":
+		return nil
+	default:
+		return fmt.Errorf("invalid fx background_mode %q: expected blur, mask, replace, or chroma", mode)
+	}
+}
+
+func ValidateChromaColor(value string) error {
+	if len(value) != 7 || value[0] != '#' {
+		return fmt.Errorf("invalid fx chroma_color %q: expected #rrggbb", value)
+	}
+	for _, ch := range value[1:] {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
+			return fmt.Errorf("invalid fx chroma_color %q: expected #rrggbb", value)
+		}
+	}
+	return nil
 }
 
 func ValidateTheme(theme string) error {

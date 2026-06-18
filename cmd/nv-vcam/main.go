@@ -6,13 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
+	"nv-vcam/internal/fx"
 	"nv-vcam/internal/loopback"
 	"nv-vcam/internal/runner"
 	svc "nv-vcam/internal/service"
@@ -44,6 +47,8 @@ func run(args []string) error {
 		return loopbackCmd(ctx, args[0], args[2:])
 	case "service":
 		return serviceCmd(ctx, args[2:])
+	case "fx":
+		return fxCmd(args[2:])
 	case "run":
 		cfg := loadEffectiveConfig()
 		return runner.Run(context.Background(), cfg)
@@ -66,7 +71,144 @@ func usage() {
   nv-vcam loopback reload [--dry-run]
   nv-vcam service install [--force] [--dry-run] [--enable] [--start]
   nv-vcam service start|stop|restart|status [--dry-run]
+  nv-vcam fx doctor
+  nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--denoise-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
+  nv-vcam fx stream [--input /dev/video10] [--output /dev/video20] [--width 2560] [--height 1440] [--fps 25] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
   nv-vcam run`)
+}
+
+func fxCmd(args []string) error {
+	if len(args) < 1 {
+		return errors.New("fx requires doctor, test-image, or stream")
+	}
+	switch args[0] {
+	case "doctor":
+		cfg := loadEffectiveConfig()
+		result := fx.Doctor(cfg)
+		fmt.Println("fx doctor")
+		fmt.Printf("backend: maxine\n")
+		fmt.Printf("sdk_path: %s\n", result.SDKPath)
+		fmt.Printf("model_dir: %s\n", result.ModelDir)
+		fmt.Printf("helper: %s\n", result.HelperPath)
+		fmt.Printf("os_release_shim: %t\n", result.OSReleaseShim)
+		if result.ShimPath != "" {
+			fmt.Printf("shim: %s\n", result.ShimPath)
+		}
+		if result.SDKVersion != "" {
+			fmt.Printf("sdk_version: %s\n", result.SDKVersion)
+		}
+		fmt.Printf("sdk_exists: %t\n", result.SDKExists)
+		fmt.Printf("features_ok: %t\n", result.FeaturesOK)
+		fmt.Printf("models_ok: %t\n", result.ModelsOK)
+		fmt.Printf("linker_ok: %t\n", result.LinkerOK)
+		fmt.Printf("helper_ok: %t\n", result.HelperOK)
+		for _, path := range result.MissingFiles {
+			fmt.Printf("missing_file: %s\n", path)
+		}
+		for _, lib := range result.MissingLibraries {
+			fmt.Printf("missing_library: %s\n", lib)
+		}
+		fmt.Printf("message: %s\n", result.Message)
+		if !result.HelperOK {
+			return errors.New("Maxine FX runtime check failed")
+		}
+		return nil
+	case "test-image":
+		fs := flag.NewFlagSet("fx test-image", flag.ContinueOnError)
+		input := fs.String("input", "", "input image path")
+		blurOutput := fs.String("blur-output", "", "background blur output image path")
+		removedOutput := fs.String("removed-output", "", "transparent background-removed output image path")
+		mask := fs.String("mask", "", "optional output mask image path")
+		finalOutput := fs.String("final-output", "", "optional selected effect chain output image path")
+		denoiseOutput := fs.String("denoise-output", "", "optional denoise-only output image path")
+		backgroundMode := fs.String("background", "", "background mode: blur, mask, replace, or chroma")
+		backgroundImage := fs.String("background-image", "", "replacement background image path")
+		chromaColor := fs.String("chroma-color", "", "chroma background color as #rrggbb")
+		blurStrength := fs.Float64("blur-strength", 0, "background blur strength")
+		denoiseEnabled := fs.Bool("denoise", false, "enable webcam denoise")
+		denoiseStrength := fs.Int("denoise-strength", -1, "denoise strength: 0 weak/detail-preserving, 1 strong")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		cfg := loadEffectiveConfig()
+		result, err := fx.RunTestImage(cfg, fx.TestImageOptions{
+			InputPath:       *input,
+			BlurPath:        *blurOutput,
+			RemovedPath:     *removedOutput,
+			MaskPath:        *mask,
+			FinalPath:       *finalOutput,
+			DenoisePath:     *denoiseOutput,
+			BackgroundMode:  *backgroundMode,
+			BackgroundImage: *backgroundImage,
+			ChromaColor:     *chromaColor,
+			BlurStrength:    *blurStrength,
+			DenoiseEnabled:  *denoiseEnabled,
+			DenoiseStrength: *denoiseStrength,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("fx test-image completed\n")
+		fmt.Printf("input: %s\n", result.InputPath)
+		fmt.Printf("blur_output: %s\n", result.BlurPath)
+		fmt.Printf("removed_output: %s\n", result.RemovedPath)
+		if result.MaskPath != "" {
+			fmt.Printf("mask: %s\n", result.MaskPath)
+		}
+		if result.FinalPath != "" {
+			fmt.Printf("final_output: %s\n", result.FinalPath)
+		}
+		if result.DenoisePath != "" {
+			fmt.Printf("denoise_output: %s\n", result.DenoisePath)
+		}
+		fmt.Printf("size: %dx%d\n", result.Width, result.Height)
+		fmt.Printf("runtime: %s\n", result.Runtime)
+		fmt.Printf("background: %s\n", result.BackgroundMode)
+		if result.BackgroundImage != "" {
+			fmt.Printf("background_image: %s\n", result.BackgroundImage)
+		}
+		fmt.Printf("chroma_color: %s\n", result.ChromaColor)
+		fmt.Printf("blur_strength: %.2f\n", result.BlurStrength)
+		fmt.Printf("denoise: %t\n", result.DenoiseEnabled)
+		fmt.Printf("denoise_strength: %d\n", result.DenoiseStrength)
+		return nil
+	case "stream":
+		fs := flag.NewFlagSet("fx stream", flag.ContinueOnError)
+		input := fs.String("input", "", "input video device")
+		output := fs.String("output", "", "output v4l2loopback video device")
+		width := fs.Int("width", 0, "frame width")
+		height := fs.Int("height", 0, "frame height")
+		fps := fs.Int("fps", 0, "frame rate")
+		backgroundMode := fs.String("background", "", "background mode: blur, mask, replace, or chroma")
+		backgroundImage := fs.String("background-image", "", "replacement background image path")
+		chromaColor := fs.String("chroma-color", "", "chroma background color as #rrggbb")
+		blurStrength := fs.Float64("blur-strength", 0, "background blur strength")
+		denoiseEnabled := fs.Bool("denoise", false, "enable webcam denoise")
+		denoiseStrength := fs.Int("denoise-strength", -1, "denoise strength: 0 weak/detail-preserving, 1 strong")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		cfg := loadEffectiveConfig()
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return fx.RunStream(ctx, cfg, fx.StreamOptions{
+			InputDevice:     *input,
+			OutputDevice:    *output,
+			Width:           *width,
+			Height:          *height,
+			FPS:             *fps,
+			BackgroundMode:  *backgroundMode,
+			BackgroundImage: *backgroundImage,
+			ChromaColor:     *chromaColor,
+			BlurStrength:    *blurStrength,
+			DenoiseEnabled:  *denoiseEnabled,
+			DenoiseStrength: *denoiseStrength,
+		}, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		})
+	default:
+		return fmt.Errorf("unknown fx command %q", args[0])
+	}
 }
 
 func configCmd(args []string) error {
@@ -272,6 +414,21 @@ func status(ctx context.Context) error {
 			fmt.Printf("capture state: %s (%s), consumers=%d, updated=%s\n", snap.State, snap.Message, snap.Consumers, snap.UpdatedAt)
 		} else {
 			fmt.Printf("capture state: unavailable (%s missing or unreadable)\n", statePath)
+		}
+	}
+	fmt.Printf("fx enabled: %t\n", cfg.FX.Enabled)
+	fmt.Printf("fx input: %s\n", cfg.FX.InputDevice)
+	fmt.Printf("fx output: %s\n", cfg.FX.OutputDevice)
+	if missing := fx.MissingDependencies(cfg); len(missing) > 0 {
+		fmt.Printf("fx dependencies: missing %s\n", strings.Join(missing, ", "))
+	} else {
+		fmt.Println("fx dependencies: ok")
+	}
+	if statePath, err := fx.DefaultStatePath(); err == nil {
+		if snap, ok := fx.ReadState(statePath); ok {
+			fmt.Printf("fx state: %s (%s), consumers=%d, updated=%s\n", snap.State, snap.Message, snap.Consumers, snap.UpdatedAt)
+		} else {
+			fmt.Printf("fx state: unavailable (%s missing or unreadable)\n", statePath)
 		}
 	}
 	return nil

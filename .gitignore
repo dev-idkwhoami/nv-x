@@ -11,6 +11,7 @@
 
 # Local test utilities
 /camera-test.html
+/scratch/
 
 # OS/editor noise
 .DS_Store

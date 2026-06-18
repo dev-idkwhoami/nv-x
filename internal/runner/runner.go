@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
+	"nv-vcam/internal/fx"
 )
 
 func Run(ctx context.Context, cfg config.Config) error {
@@ -19,21 +21,34 @@ func Run(ctx context.Context, cfg config.Config) error {
 	fmt.Printf("loopback config: %s\n", cfg.Loopback.ConfigPath)
 	fmt.Printf("capture device: %s\n", cfg.Capture.Device)
 	fmt.Printf("capture input: %s\n", cfg.Capture.InputCommand)
+	fmt.Printf("fx enabled: %t\n", cfg.FX.Enabled)
+	fmt.Printf("fx pipeline: %s -> %s\n", cfg.FX.InputDevice, cfg.FX.OutputDevice)
 
-	// TODO: read frames from the configured RAW V4L2 device.
-	// TODO: read frames from the configured input V4L2 device.
-	// TODO: run a segmentation model against each frame.
-	// TODO: blur or replace the frame background.
-	// TODO: write processed frames to the output v4l2loopback device.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	supervisor := capture.NewSupervisor(cfg, func(format string, args ...any) {
+	logf := func(format string, args ...any) {
 		log.Printf(format, args...)
-	})
-	if err := supervisor.Run(ctx); err != nil {
-		return err
 	}
+	rawSupervisor := capture.NewSupervisor(cfg, logf)
+	fxSupervisor := fx.NewSupervisor(cfg, logf)
+	fxSupervisor.SetInputIgnorePIDsFunc(rawSupervisor.OwnedPIDs)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := rawSupervisor.Run(ctx); err != nil {
+			log.Printf("raw supervisor stopped with error: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := fxSupervisor.Run(ctx); err != nil {
+			log.Printf("fx supervisor stopped with error: %v", err)
+		}
+	}()
+	wg.Wait()
 	fmt.Println("nv-vcam run stopped")
 	return nil
 }

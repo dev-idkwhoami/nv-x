@@ -17,6 +17,6 @@ Current and planned capabilities:
 - choose input and output devices
 - show service logs and status
 - configure future blur strength
-- configure future background image
+- configure background image replacement
 
 The first desktop implementation is Wails with a local web UI rendered through WebKit. A Fyne GUI is not planned for this repo unless the Wails path becomes blocked.

@@ -395,6 +395,10 @@ func (s *Supervisor) ownedPIDs() map[int]bool {
 	return out
 }
 
+func (s *Supervisor) OwnedPIDs() map[int]bool {
+	return s.ownedPIDs()
+}
+
 func (s *Supervisor) stateValue() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
