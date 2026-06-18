@@ -84,10 +84,16 @@ func fxCmd(args []string) error {
 		result := fx.Doctor(cfg)
 		fmt.Println("fx doctor")
 		fmt.Printf("onnxruntime: %s\n", result.RuntimeLibraryPath)
+		if result.CUDAProviderPath != "" {
+			fmt.Printf("cuda_provider: %s\n", result.CUDAProviderPath)
+		}
 		fmt.Printf("provider: %s\n", result.Provider)
 		fmt.Printf("device_id: %d\n", result.DeviceID)
 		fmt.Printf("runtime_ok: %t\n", result.RuntimeOK)
 		fmt.Printf("cuda_provider_ok: %t\n", result.CUDAProviderOK)
+		if len(result.MissingLibraries) > 0 {
+			fmt.Printf("missing_libraries: %s\n", strings.Join(result.MissingLibraries, ", "))
+		}
 		fmt.Printf("model: %s\n", result.ModelPath)
 		fmt.Printf("model_exists: %t\n", result.ModelExists)
 		fmt.Printf("message: %s\n", result.Message)
