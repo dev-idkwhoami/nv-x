@@ -104,6 +104,16 @@ nv-vcam service status
 
 `nv-vcam loopback write` writes `/etc/modprobe.d/nv-vcam-v4l2loopback.conf`, so it requires root. If run without root, it prints the exact `sudo` command to run.
 
+## FX Development
+
+The `features/camera-fx` branch starts FX work with a still-image command before realtime video integration:
+
+```bash
+nv-vcam fx test-image --input ./input.jpg --output ./out.png --mask ./mask.png
+```
+
+This first command validates image loading, mask output, and compositing paths with a deterministic placeholder CPU mask. The CUDA/model runtime is intentionally the next step, after the command shape and output files are stable.
+
 ## RAW Capture Service
 
 `nv-vcam run` is the systemd service entrypoint. It checks for `gphoto2` and `ffmpeg`, writes an idle stream to `/dev/video10`, watches for external consumers, and starts the Sony RAW capture pipeline on demand. When no consumer remains for the configured timeout, it stops the expensive capture process and returns to the idle stream.

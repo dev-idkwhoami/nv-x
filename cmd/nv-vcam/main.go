@@ -13,6 +13,7 @@ import (
 	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
+	"nv-vcam/internal/fx"
 	"nv-vcam/internal/loopback"
 	"nv-vcam/internal/runner"
 	svc "nv-vcam/internal/service"
@@ -44,6 +45,8 @@ func run(args []string) error {
 		return loopbackCmd(ctx, args[0], args[2:])
 	case "service":
 		return serviceCmd(ctx, args[2:])
+	case "fx":
+		return fxCmd(args[2:])
 	case "run":
 		cfg := loadEffectiveConfig()
 		return runner.Run(context.Background(), cfg)
@@ -66,7 +69,43 @@ func usage() {
   nv-vcam loopback reload [--dry-run]
   nv-vcam service install [--force] [--dry-run] [--enable] [--start]
   nv-vcam service start|stop|restart|status [--dry-run]
+  nv-vcam fx test-image --input path --output path [--mask path]
   nv-vcam run`)
+}
+
+func fxCmd(args []string) error {
+	if len(args) < 1 {
+		return errors.New("fx requires test-image")
+	}
+	switch args[0] {
+	case "test-image":
+		fs := flag.NewFlagSet("fx test-image", flag.ContinueOnError)
+		input := fs.String("input", "", "input image path")
+		output := fs.String("output", "", "output preview image path")
+		mask := fs.String("mask", "", "optional output mask image path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := fx.RunTestImage(fx.TestImageOptions{
+			InputPath:  *input,
+			OutputPath: *output,
+			MaskPath:   *mask,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("fx test-image completed\n")
+		fmt.Printf("input: %s\n", result.InputPath)
+		fmt.Printf("output: %s\n", result.OutputPath)
+		if result.MaskPath != "" {
+			fmt.Printf("mask: %s\n", result.MaskPath)
+		}
+		fmt.Printf("size: %dx%d\n", result.Width, result.Height)
+		fmt.Printf("runtime: %s\n", result.Runtime)
+		return nil
+	default:
+		return fmt.Errorf("unknown fx command %q", args[0])
+	}
 }
 
 func configCmd(args []string) error {
