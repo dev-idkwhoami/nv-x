@@ -23,6 +23,7 @@ bin/nv-vcam-maxine-helper: cmd/nv-vcam-maxine-helper/main.cpp
 		-I"$(MAXINE_SDK)/include" \
 		-I"$(MAXINE_SDK)/features/nvvfxgreenscreen/include" \
 		-I"$(MAXINE_SDK)/features/nvvfxbackgroundblur/include" \
+		-I"$(MAXINE_SDK)/features/nvvfxdenoising/include" \
 		-L"$(MAXINE_SDK)/lib" \
 		$(MAXINE_RPATH) \
 		-o $@ $< -lVideoFX -lNVCVImage

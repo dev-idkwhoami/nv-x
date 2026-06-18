@@ -39,12 +39,17 @@ type Snapshot struct {
 }
 
 type StreamOptions struct {
-	InputDevice  string
-	OutputDevice string
-	Width        int
-	Height       int
-	FPS          int
-	BlurStrength float64
+	InputDevice     string
+	OutputDevice    string
+	Width           int
+	Height          int
+	FPS             int
+	BackgroundMode  string
+	BackgroundImage string
+	ChromaColor     string
+	BlurStrength    float64
+	DenoiseEnabled  bool
+	DenoiseStrength int
 }
 
 type Supervisor struct {
@@ -331,8 +336,23 @@ func normalizeStreamOptions(cfg config.Config, opts StreamOptions) StreamOptions
 	if opts.FPS <= 0 {
 		opts.FPS = fps
 	}
+	if opts.BackgroundMode == "" {
+		opts.BackgroundMode = cfg.FX.BackgroundMode
+	}
+	if opts.BackgroundImage == "" {
+		opts.BackgroundImage = cfg.FX.BackgroundImage
+	}
+	if opts.ChromaColor == "" {
+		opts.ChromaColor = cfg.FX.ChromaColor
+	}
 	if opts.BlurStrength <= 0 {
 		opts.BlurStrength = cfg.FX.BlurStrength
+	}
+	if !opts.DenoiseEnabled {
+		opts.DenoiseEnabled = cfg.FX.DenoiseEnabled
+	}
+	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
+		opts.DenoiseStrength = cfg.FX.DenoiseStrength
 	}
 	return opts
 }
@@ -349,6 +369,21 @@ func validateStreamOptions(opts StreamOptions) error {
 	}
 	if opts.FPS <= 0 {
 		return fmt.Errorf("fx stream fps must be positive, got %d", opts.FPS)
+	}
+	if err := config.ValidateBackgroundMode(opts.BackgroundMode); err != nil {
+		return err
+	}
+	if opts.BackgroundMode == "replace" && opts.BackgroundImage == "" {
+		return errors.New("fx background_mode replace requires fx.background_image or --background-image; live V4L2 output cannot be transparent")
+	}
+	if err := config.ValidateChromaColor(opts.ChromaColor); err != nil {
+		return err
+	}
+	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
+		return fmt.Errorf("fx stream denoise strength must be 0 or 1, got %d", opts.DenoiseStrength)
+	}
+	if opts.DenoiseEnabled && opts.Height > 1080 {
+		return fmt.Errorf("fx denoise supports up to 1080p input height, got %d; disable denoise or lower fx.height", opts.Height)
 	}
 	return nil
 }
@@ -386,6 +421,15 @@ func startFXPipeline(ctx context.Context, cfg config.Config, opts StreamOptions,
 	if len(result.MissingFiles) > 0 {
 		return nil, fmt.Errorf("Maxine SDK installation is incomplete: %s", strings.Join(result.MissingFiles, ", "))
 	}
+	var cleanup func()
+	replacementPath := ""
+	if opts.BackgroundMode == "replace" {
+		var err error
+		replacementPath, cleanup, err = prepareReplacementPPM(opts)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	specs := []commandSpec{
 		{Name: "ffmpeg", Args: FXInputFFmpegArgs(opts)},
@@ -396,11 +440,51 @@ func startFXPipeline(ctx context.Context, cfg config.Config, opts StreamOptions,
 			"--width", strconv.Itoa(opts.Width),
 			"--height", strconv.Itoa(opts.Height),
 			"--fps", strconv.Itoa(opts.FPS),
+			"--background", opts.BackgroundMode,
+			"--replacement", replacementPath,
+			"--chroma-color", opts.ChromaColor,
 			"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
+			"--denoise", boolArg(opts.DenoiseEnabled),
+			"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
 		}, Env: env},
 		{Name: "ffmpeg", Args: FXOutputFFmpegArgs(opts)},
 	}
-	return startProcessGroup(ctx, "fx", nil, logf, specs)
+	group, err := startProcessGroupWithCleanup(ctx, "fx", nil, logf, cleanup, specs)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, err
+	}
+	return group, nil
+}
+
+func prepareReplacementPPM(opts StreamOptions) (string, func(), error) {
+	path, err := config.ExpandPath(opts.BackgroundImage)
+	if err != nil {
+		return "", nil, err
+	}
+	img, err := LoadImage(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("load replacement image: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "nv-vcam-bg-*")
+	if err != nil {
+		return "", nil, err
+	}
+	out := filepath.Join(dir, "replacement.ppm")
+	if err := WritePPM(out, ResizeCover(img, opts.Width, opts.Height)); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return out, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func boolArg(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func (s *Supervisor) setCurrent(group *processGroup, state State, message string) {
@@ -511,17 +595,22 @@ type commandSpec struct {
 }
 
 type processGroup struct {
-	name string
-	cmds []*exec.Cmd
-	done chan struct{}
-	once sync.Once
+	name    string
+	cmds    []*exec.Cmd
+	done    chan struct{}
+	once    sync.Once
+	cleanup func()
 }
 
 func startProcessGroup(ctx context.Context, name string, env []string, logf func(string, ...any), specs []commandSpec) (*processGroup, error) {
+	return startProcessGroupWithCleanup(ctx, name, env, logf, nil, specs)
+}
+
+func startProcessGroupWithCleanup(ctx context.Context, name string, env []string, logf func(string, ...any), cleanup func(), specs []commandSpec) (*processGroup, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	group := &processGroup{name: name, done: make(chan struct{})}
+	group := &processGroup{name: name, done: make(chan struct{}), cleanup: cleanup}
 	var previous io.ReadCloser
 	for i, spec := range specs {
 		cmd := exec.CommandContext(ctx, spec.Name, spec.Args...)
@@ -560,6 +649,9 @@ func startProcessGroup(ctx context.Context, name string, env []string, logf func
 			if err := cmd.Wait(); err != nil {
 				logf("%s exited pid=%d: %v", name, processPID(cmd), err)
 			}
+		}
+		if group.cleanup != nil {
+			group.cleanup()
 		}
 		close(group.done)
 	}()

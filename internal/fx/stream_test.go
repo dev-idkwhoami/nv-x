@@ -59,7 +59,7 @@ func TestNormalizeStreamOptionsUsesConfigDefaults(t *testing.T) {
 	if opts.InputDevice != "/dev/video10" || opts.OutputDevice != "/dev/video20" {
 		t.Fatalf("unexpected devices: %+v", opts)
 	}
-	if opts.Width != 2560 || opts.Height != 1440 || opts.FPS != 25 || opts.BlurStrength != 0.75 {
+	if opts.Width != 2560 || opts.Height != 1440 || opts.FPS != 25 || opts.BackgroundMode != "blur" || opts.BackgroundImage != "" || opts.ChromaColor != "#00ff00" || opts.BlurStrength != 0.75 || opts.DenoiseEnabled || opts.DenoiseStrength != 0 {
 		t.Fatalf("unexpected geometry/effect defaults: %+v", opts)
 	}
 }
@@ -74,6 +74,70 @@ func TestValidateStreamOptionsRejectsSmallFrames(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected small frame size error")
+	}
+}
+
+func TestValidateStreamOptionsRejectsInvalidEffects(t *testing.T) {
+	err := validateStreamOptions(StreamOptions{
+		InputDevice:     "/dev/video10",
+		OutputDevice:    "/dev/video20",
+		Width:           2560,
+		Height:          1440,
+		FPS:             25,
+		BackgroundMode:  "matte",
+		DenoiseStrength: 0,
+	})
+	if err == nil {
+		t.Fatal("expected invalid background mode error")
+	}
+	err = validateStreamOptions(StreamOptions{
+		InputDevice:    "/dev/video10",
+		OutputDevice:   "/dev/video20",
+		Width:          2560,
+		Height:         1440,
+		FPS:            25,
+		BackgroundMode: "replace",
+	})
+	if err == nil {
+		t.Fatal("expected missing replacement image error")
+	}
+	err = validateStreamOptions(StreamOptions{
+		InputDevice:     "/dev/video10",
+		OutputDevice:    "/dev/video20",
+		Width:           2560,
+		Height:          1440,
+		FPS:             25,
+		BackgroundMode:  "blur",
+		DenoiseStrength: 3,
+	})
+	if err == nil {
+		t.Fatal("expected invalid denoise strength error")
+	}
+	err = validateStreamOptions(StreamOptions{
+		InputDevice:     "/dev/video10",
+		OutputDevice:    "/dev/video20",
+		Width:           2560,
+		Height:          1440,
+		FPS:             25,
+		BackgroundMode:  "chroma",
+		ChromaColor:     "00ff00",
+		DenoiseStrength: 0,
+	})
+	if err == nil {
+		t.Fatal("expected invalid chroma color error")
+	}
+	err = validateStreamOptions(StreamOptions{
+		InputDevice:     "/dev/video10",
+		OutputDevice:    "/dev/video20",
+		Width:           2560,
+		Height:          1440,
+		FPS:             25,
+		BackgroundMode:  "blur",
+		DenoiseEnabled:  true,
+		DenoiseStrength: 0,
+	})
+	if err == nil {
+		t.Fatal("expected denoise max height error")
 	}
 }
 

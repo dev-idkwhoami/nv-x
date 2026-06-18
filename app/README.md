@@ -28,5 +28,5 @@ Current first GUI surface:
 - loopback config status and reload/write controls
 - config display and edit controls
 - future blur strength setting
-- future background image setting
+- background image replacement setting
 - service logs/status view

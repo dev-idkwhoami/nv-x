@@ -1,5 +1,5 @@
 export namespace capture {
-	
+
 	export class Snapshot {
 	    state: string;
 	    device: string;
@@ -7,11 +7,11 @@ export namespace capture {
 	    consumers: number;
 	    message: string;
 	    updatedAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.state = source["state"];
@@ -26,7 +26,7 @@ export namespace capture {
 }
 
 export namespace config {
-	
+
 	export class CaptureConfig {
 	    Enabled: boolean;
 	    InputCommand: string;
@@ -37,11 +37,11 @@ export namespace config {
 	    UseCUDAScale: boolean;
 	    IdleTimeoutSeconds: number;
 	    IdleLabel: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CaptureConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Enabled = source["Enabled"];
@@ -57,11 +57,11 @@ export namespace config {
 	}
 	export class UIConfig {
 	    Theme: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new UIConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Theme = source["Theme"];
@@ -70,11 +70,11 @@ export namespace config {
 	export class ServiceConfig {
 	    Name: string;
 	    ExecPath: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ServiceConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -89,15 +89,20 @@ export namespace config {
 	    Width: number;
 	    Height: number;
 	    FPS: number;
+	    BackgroundMode: string;
+	    BackgroundImage: string;
+	    ChromaColor: string;
 	    SDKPath: string;
 	    ModelDir: string;
 	    EnableOSReleaseShim: boolean;
 	    BlurStrength: number;
-	
+	    DenoiseEnabled: boolean;
+	    DenoiseStrength: number;
+
 	    static createFrom(source: any = {}) {
 	        return new FXConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Enabled = source["Enabled"];
@@ -107,21 +112,26 @@ export namespace config {
 	        this.Width = source["Width"];
 	        this.Height = source["Height"];
 	        this.FPS = source["FPS"];
+	        this.BackgroundMode = source["BackgroundMode"];
+	        this.BackgroundImage = source["BackgroundImage"];
+	        this.ChromaColor = source["ChromaColor"];
 	        this.SDKPath = source["SDKPath"];
 	        this.ModelDir = source["ModelDir"];
 	        this.EnableOSReleaseShim = source["EnableOSReleaseShim"];
 	        this.BlurStrength = source["BlurStrength"];
+	        this.DenoiseEnabled = source["DenoiseEnabled"];
+	        this.DenoiseStrength = source["DenoiseStrength"];
 	    }
 	}
 	export class LoopbackConfig {
 	    ConfigPath: string;
 	    ExclusiveCaps: boolean;
 	    MaxBuffers: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LoopbackConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ConfigPath = source["ConfigPath"];
@@ -133,11 +143,11 @@ export namespace config {
 	    Device: string;
 	    VideoNR: number;
 	    Label: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OutputConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Device = source["Device"];
@@ -148,11 +158,11 @@ export namespace config {
 	export class InputConfig {
 	    Device: string;
 	    Label: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InputConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Device = source["Device"];
@@ -167,11 +177,11 @@ export namespace config {
 	    FX: FXConfig;
 	    Service: ServiceConfig;
 	    UI: UIConfig;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Input = this.convertValues(source["Input"], InputConfig);
@@ -182,7 +192,7 @@ export namespace config {
 	        this.Service = this.convertValues(source["Service"], ServiceConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -201,25 +211,25 @@ export namespace config {
 		    return a;
 		}
 	}
-	
-	
-	
-	
-	
+
+
+
+
+
 
 }
 
 export namespace devices {
-	
+
 	export class Device {
 	    SysName: string;
 	    Path: string;
 	    Name: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Device(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SysName = source["SysName"];
@@ -258,16 +268,16 @@ export namespace fx {
 }
 
 export namespace loopback {
-	
+
 	export class FoundConfig {
 	    Path: string;
 	    Content: string;
 	    IsNV: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FoundConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Path = source["Path"];
@@ -279,16 +289,16 @@ export namespace loopback {
 }
 
 export namespace main {
-	
+
 	export class ActionResult {
 	    ok: boolean;
 	    message: string;
 	    output: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ActionResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
@@ -302,11 +312,11 @@ export namespace main {
 	    active: boolean;
 	    error: string;
 	    output: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ServiceView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -329,11 +339,11 @@ export namespace main {
 	    configRendered: string;
 	    capture: capture.Snapshot;
 	    fx: fx.Snapshot;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.devices = this.convertValues(source["devices"], devices.Device);
@@ -349,7 +359,7 @@ export namespace main {
 	        this.capture = this.convertValues(source["capture"], capture.Snapshot);
 	        this.fx = this.convertValues(source["fx"], fx.Snapshot);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -373,11 +383,11 @@ export namespace main {
 	    found: boolean;
 	    rendered: string;
 	    config: config.Config;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -385,7 +395,7 @@ export namespace main {
 	        this.rendered = source["rendered"];
 	        this.config = this.convertValues(source["config"], config.Config);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -410,11 +420,11 @@ export namespace main {
 	    conflict: boolean;
 	    warning: string;
 	    rendered: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LoopbackView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.targetPath = source["targetPath"];
@@ -423,7 +433,7 @@ export namespace main {
 	        this.warning = source["warning"];
 	        this.rendered = source["rendered"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -442,14 +452,14 @@ export namespace main {
 		    return a;
 		}
 	}
-	
+
 	export class ThemeView {
 	    theme: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ThemeView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.theme = source["theme"];

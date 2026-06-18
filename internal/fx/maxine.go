@@ -46,22 +46,36 @@ type DoctorResult struct {
 }
 
 type TestImageOptions struct {
-	InputPath    string
-	BlurPath     string
-	RemovedPath  string
-	MaskPath     string
-	BlurStrength float64
+	InputPath       string
+	BlurPath        string
+	RemovedPath     string
+	MaskPath        string
+	FinalPath       string
+	DenoisePath     string
+	BackgroundMode  string
+	BackgroundImage string
+	ChromaColor     string
+	BlurStrength    float64
+	DenoiseEnabled  bool
+	DenoiseStrength int
 }
 
 type TestImageResult struct {
-	InputPath    string
-	BlurPath     string
-	RemovedPath  string
-	MaskPath     string
-	Width        int
-	Height       int
-	Runtime      string
-	BlurStrength float64
+	InputPath       string
+	BlurPath        string
+	RemovedPath     string
+	MaskPath        string
+	FinalPath       string
+	DenoisePath     string
+	Width           int
+	Height          int
+	Runtime         string
+	BackgroundMode  string
+	BackgroundImage string
+	ChromaColor     string
+	BlurStrength    float64
+	DenoiseEnabled  bool
+	DenoiseStrength int
 }
 
 func Doctor(cfg config.Config) DoctorResult {
@@ -89,10 +103,17 @@ func Doctor(cfg config.Config) DoctorResult {
 		return result
 	}
 
+	doctorBackgroundMode := cfg.FX.BackgroundMode
+	if doctorBackgroundMode == "replace" {
+		doctorBackgroundMode = "blur"
+	}
 	cmd := exec.Command(result.HelperPath, "doctor",
 		"--sdk-path", result.SDKPath,
 		"--model-dir", result.ModelDir,
+		"--background", doctorBackgroundMode,
 		"--blur-strength", fmt.Sprintf("%.3f", cfg.FX.BlurStrength),
+		"--denoise", boolArg(cfg.FX.DenoiseEnabled),
+		"--denoise-strength", strconv.Itoa(cfg.FX.DenoiseStrength),
 	)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -120,6 +141,32 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if opts.BlurStrength <= 0 {
 		opts.BlurStrength = cfg.FX.BlurStrength
 	}
+	if opts.BackgroundMode == "" {
+		opts.BackgroundMode = cfg.FX.BackgroundMode
+	}
+	if err := config.ValidateBackgroundMode(opts.BackgroundMode); err != nil {
+		return TestImageResult{}, err
+	}
+	if opts.BackgroundImage == "" {
+		opts.BackgroundImage = cfg.FX.BackgroundImage
+	}
+	backgroundImage, err := config.ExpandPath(opts.BackgroundImage)
+	if err != nil {
+		return TestImageResult{}, err
+	}
+	opts.BackgroundImage = backgroundImage
+	if opts.ChromaColor == "" {
+		opts.ChromaColor = cfg.FX.ChromaColor
+	}
+	if err := config.ValidateChromaColor(opts.ChromaColor); err != nil {
+		return TestImageResult{}, err
+	}
+	if !opts.DenoiseEnabled {
+		opts.DenoiseEnabled = cfg.FX.DenoiseEnabled
+	}
+	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
+		opts.DenoiseStrength = cfg.FX.DenoiseStrength
+	}
 
 	env, doctor := maxineEnv(cfg)
 	if doctor.HelperPath == "" {
@@ -141,6 +188,9 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if width < 512 || height < 288 {
 		return TestImageResult{}, fmt.Errorf("Maxine test image must be at least 512x288, got %dx%d", width, height)
 	}
+	if opts.DenoiseEnabled && height > 1080 {
+		return TestImageResult{}, fmt.Errorf("Maxine denoise supports up to 1080p input height, got %d; disable denoise or use a smaller input image", height)
+	}
 
 	dir, err := os.MkdirTemp("", "nv-vcam-fx-*")
 	if err != nil {
@@ -151,6 +201,8 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	inputPPM := filepath.Join(dir, "input.ppm")
 	maskPGM := filepath.Join(dir, "mask.pgm")
 	blurPPM := filepath.Join(dir, "blur.ppm")
+	finalPPM := filepath.Join(dir, "final.ppm")
+	denoisePPM := filepath.Join(dir, "denoise.ppm")
 	if err := WritePPM(inputPPM, src); err != nil {
 		return TestImageResult{}, err
 	}
@@ -161,7 +213,13 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 		"--input", inputPPM,
 		"--mask", maskPGM,
 		"--blur", blurPPM,
+		"--final", finalPPM,
+		"--denoise-output", denoisePPM,
+		"--background", opts.BackgroundMode,
 		"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
+		"--chroma-color", opts.ChromaColor,
+		"--denoise", boolArg(opts.DenoiseEnabled),
+		"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
 	)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -177,6 +235,14 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if err != nil {
 		return TestImageResult{}, err
 	}
+	final, err := ReadPPM(finalPPM)
+	if err != nil {
+		return TestImageResult{}, err
+	}
+	denoised, err := ReadPPM(denoisePPM)
+	if err != nil {
+		return TestImageResult{}, err
+	}
 
 	if opts.MaskPath != "" {
 		if err := SaveImage(opts.MaskPath, mask); err != nil {
@@ -189,16 +255,43 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if err := SaveImage(opts.RemovedPath, CompositeTransparent(src, mask)); err != nil {
 		return TestImageResult{}, err
 	}
+	if opts.FinalPath != "" {
+		if opts.BackgroundMode == "replace" {
+			replaced, err := CompositeReplacement(src, mask, opts.BackgroundImage)
+			if err != nil {
+				return TestImageResult{}, err
+			}
+			if err := SaveImage(opts.FinalPath, replaced); err != nil {
+				return TestImageResult{}, err
+			}
+		} else {
+			if err := SaveImage(opts.FinalPath, final); err != nil {
+				return TestImageResult{}, err
+			}
+		}
+	}
+	if opts.DenoisePath != "" {
+		if err := SaveImage(opts.DenoisePath, denoised); err != nil {
+			return TestImageResult{}, err
+		}
+	}
 
 	return TestImageResult{
-		InputPath:    opts.InputPath,
-		BlurPath:     opts.BlurPath,
-		RemovedPath:  opts.RemovedPath,
-		MaskPath:     opts.MaskPath,
-		Width:        width,
-		Height:       height,
-		Runtime:      "maxine",
-		BlurStrength: opts.BlurStrength,
+		InputPath:       opts.InputPath,
+		BlurPath:        opts.BlurPath,
+		RemovedPath:     opts.RemovedPath,
+		MaskPath:        opts.MaskPath,
+		FinalPath:       opts.FinalPath,
+		DenoisePath:     opts.DenoisePath,
+		Width:           width,
+		Height:          height,
+		Runtime:         "maxine",
+		BackgroundMode:  opts.BackgroundMode,
+		BackgroundImage: opts.BackgroundImage,
+		ChromaColor:     opts.ChromaColor,
+		BlurStrength:    opts.BlurStrength,
+		DenoiseEnabled:  opts.DenoiseEnabled,
+		DenoiseStrength: opts.DenoiseStrength,
 	}, nil
 }
 
@@ -244,7 +337,6 @@ func missingMaxineFiles(sdkPath, modelDir string) []string {
 		filepath.Join(sdkPath, "lib", "libNVCVImage.so"),
 		filepath.Join(sdkPath, "features", "nvvfxgreenscreen", "lib", "libnvVFXGreenScreen.so"),
 		filepath.Join(sdkPath, "features", "nvvfxbackgroundblur", "lib", "libnvVFXBackgroundBlur.so"),
-		filepath.Join(sdkPath, "features", "nvvfxdenoising", "lib", "libnvVFXDenoising.so"),
 	}
 	var missing []string
 	for _, path := range required {
@@ -254,7 +346,6 @@ func missingMaxineFiles(sdkPath, modelDir string) []string {
 	}
 	for _, pattern := range []string{
 		filepath.Join(modelDir, "AIGS_*_89_*.engine.trtpkg"),
-		filepath.Join(modelDir, "Denoise-*-89.engine.trtpkg"),
 	} {
 		matches, _ := filepath.Glob(pattern)
 		if len(matches) == 0 {
@@ -405,9 +496,33 @@ func LoadImage(path string) (image.Image, error) {
 	defer file.Close()
 	img, _, err := image.Decode(file)
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
+		fallback, fallbackErr := LoadImageWithFFmpeg(path)
+		if fallbackErr == nil {
+			return fallback, nil
+		}
+		return nil, fmt.Errorf("decode %s: %w; ffmpeg fallback failed: %v", path, err, fallbackErr)
 	}
 	return img, nil
+}
+
+func LoadImageWithFFmpeg(path string) (image.Image, error) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command("ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", path,
+		"-frames:v", "1",
+		"-f", "image2pipe",
+		"-vcodec", "ppm",
+		"-",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return DecodePPM(out)
 }
 
 func SaveImage(path string, img image.Image) error {
@@ -450,10 +565,18 @@ func ReadPPM(path string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
+	img, err := DecodePPM(data)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return img, nil
+}
+
+func DecodePPM(data []byte) (*image.RGBA, error) {
 	reader := bytes.NewReader(data)
 	width, height, err := readPNMHeader(reader, "P6")
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, err
 	}
 	pixels := make([]byte, width*height*3)
 	if _, err := io.ReadFull(reader, pixels); err != nil {
@@ -577,6 +700,71 @@ func CompositeTransparent(src image.Image, mask *image.Gray) *image.RGBA {
 				B: uint8(b >> 8),
 				A: alpha,
 			})
+		}
+	}
+	return out
+}
+
+func CompositeReplacement(src image.Image, mask *image.Gray, replacementPath string) (image.Image, error) {
+	if replacementPath == "" {
+		return CompositeTransparent(src, mask), nil
+	}
+	replacement, err := LoadImage(replacementPath)
+	if err != nil {
+		return nil, fmt.Errorf("load replacement image: %w", err)
+	}
+	bounds := src.Bounds()
+	bg := ResizeCover(replacement, bounds.Dx(), bounds.Dy())
+	out := image.NewRGBA(bg.Bounds())
+	draw.Draw(out, out.Bounds(), bg, image.Point{}, draw.Src)
+	for y := 0; y < bounds.Dy(); y++ {
+		for x := 0; x < bounds.Dx(); x++ {
+			alpha := uint32(mask.GrayAt(x, y).Y)
+			invAlpha := uint32(255 - mask.GrayAt(x, y).Y)
+			sr, sg, sb, _ := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			br, bgc, bb, _ := out.At(x, y).RGBA()
+			out.SetRGBA(x, y, color.RGBA{
+				R: uint8(((sr>>8)*alpha + (br>>8)*invAlpha) / 255),
+				G: uint8(((sg>>8)*alpha + (bgc>>8)*invAlpha) / 255),
+				B: uint8(((sb>>8)*alpha + (bb>>8)*invAlpha) / 255),
+				A: 255,
+			})
+		}
+	}
+	return out, nil
+}
+
+func ResizeCover(src image.Image, width, height int) *image.RGBA {
+	out := image.NewRGBA(image.Rect(0, 0, width, height))
+	if width <= 0 || height <= 0 {
+		return out
+	}
+	bounds := src.Bounds()
+	srcW, srcH := bounds.Dx(), bounds.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return out
+	}
+	scaleW := float64(width) / float64(srcW)
+	scaleH := float64(height) / float64(srcH)
+	scale := scaleW
+	if scaleH > scale {
+		scale = scaleH
+	}
+	scaledW := int(float64(srcW)*scale + 0.5)
+	scaledH := int(float64(srcH)*scale + 0.5)
+	if scaledW < width {
+		scaledW = width
+	}
+	if scaledH < height {
+		scaledH = height
+	}
+	offsetX := (scaledW - width) / 2
+	offsetY := (scaledH - height) / 2
+	for y := 0; y < height; y++ {
+		srcY := bounds.Min.Y + ((y+offsetY)*srcH)/scaledH
+		for x := 0; x < width; x++ {
+			srcX := bounds.Min.X + ((x+offsetX)*srcW)/scaledW
+			out.Set(x, y, src.At(srcX, srcY))
 		}
 	}
 	return out
