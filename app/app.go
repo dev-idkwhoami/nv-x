@@ -14,6 +14,7 @@ import (
 	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
+	"nv-vcam/internal/fx"
 	"nv-vcam/internal/loopback"
 	svc "nv-vcam/internal/service"
 )
@@ -67,6 +68,7 @@ type AppStatus struct {
 	ExpectedOutputExists bool             `json:"expectedOutputExists"`
 	ConfigRendered       string           `json:"configRendered"`
 	Capture              capture.Snapshot `json:"capture"`
+	FX                   fx.Snapshot      `json:"fx"`
 }
 
 func NewApp() *App {
@@ -98,6 +100,17 @@ func (a *App) GetStatus() AppStatus {
 			captureSnapshot = snap
 		}
 	}
+	fxSnapshot := fx.Snapshot{
+		State:        fx.StateDisabled,
+		Device:       cfg.FX.OutputDevice,
+		Dependencies: fx.MissingDependencies(cfg),
+		Message:      "fx state file not found; start nv-vcam.service",
+	}
+	if statePath, err := fx.DefaultStatePath(); err == nil {
+		if snap, ok := fx.ReadState(statePath); ok {
+			fxSnapshot = snap
+		}
+	}
 
 	return AppStatus{
 		Devices:              devs,
@@ -117,6 +130,7 @@ func (a *App) GetStatus() AppStatus {
 		ExpectedOutputExists: devices.DeviceExists(cfg.Output.Device),
 		ConfigRendered:       config.Render(cfg),
 		Capture:              captureSnapshot,
+		FX:                   fxSnapshot,
 	}
 }
 

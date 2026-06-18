@@ -82,6 +82,13 @@ export namespace config {
 	    }
 	}
 	export class FXConfig {
+	    Enabled: boolean;
+	    IdleEnabled: boolean;
+	    InputDevice: string;
+	    OutputDevice: string;
+	    Width: number;
+	    Height: number;
+	    FPS: number;
 	    SDKPath: string;
 	    ModelDir: string;
 	    EnableOSReleaseShim: boolean;
@@ -93,6 +100,13 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Enabled = source["Enabled"];
+	        this.IdleEnabled = source["IdleEnabled"];
+	        this.InputDevice = source["InputDevice"];
+	        this.OutputDevice = source["OutputDevice"];
+	        this.Width = source["Width"];
+	        this.Height = source["Height"];
+	        this.FPS = source["FPS"];
 	        this.SDKPath = source["SDKPath"];
 	        this.ModelDir = source["ModelDir"];
 	        this.EnableOSReleaseShim = source["EnableOSReleaseShim"];
@@ -216,6 +230,33 @@ export namespace devices {
 
 }
 
+export namespace fx {
+
+	export class Snapshot {
+	    state: string;
+	    device: string;
+	    dependencies: string[];
+	    consumers: number;
+	    message: string;
+	    updatedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Snapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.device = source["device"];
+	        this.dependencies = source["dependencies"];
+	        this.consumers = source["consumers"];
+	        this.message = source["message"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+
+}
+
 export namespace loopback {
 	
 	export class FoundConfig {
@@ -287,6 +328,7 @@ export namespace main {
 	    expectedOutputExists: boolean;
 	    configRendered: string;
 	    capture: capture.Snapshot;
+	    fx: fx.Snapshot;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppStatus(source);
@@ -305,6 +347,7 @@ export namespace main {
 	        this.expectedOutputExists = source["expectedOutputExists"];
 	        this.configRendered = source["configRendered"];
 	        this.capture = this.convertValues(source["capture"], capture.Snapshot);
+	        this.fx = this.convertValues(source["fx"], fx.Snapshot);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -414,4 +457,3 @@ export namespace main {
 	}
 
 }
-

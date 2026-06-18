@@ -50,6 +50,13 @@ type CaptureConfig struct {
 }
 
 type FXConfig struct {
+	Enabled             bool
+	IdleEnabled         bool
+	InputDevice         string
+	OutputDevice        string
+	Width               int
+	Height              int
+	FPS                 int
 	SDKPath             string
 	ModelDir            string
 	EnableOSReleaseShim bool
@@ -93,6 +100,13 @@ func Default() Config {
 			IdleLabel:          "nv-vcam idling ...",
 		},
 		FX: FXConfig{
+			Enabled:             true,
+			IdleEnabled:         true,
+			InputDevice:         "/dev/video10",
+			OutputDevice:        "/dev/video20",
+			Width:               2560,
+			Height:              1440,
+			FPS:                 25,
 			SDKPath:             "/usr/local/VideoFX",
 			ModelDir:            "/usr/local/VideoFX/lib/models",
 			EnableOSReleaseShim: true,
@@ -169,6 +183,13 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "idle_timeout_seconds = %d\n", c.Capture.IdleTimeoutSeconds)
 	fmt.Fprintf(&b, "idle_label = %q\n\n", c.Capture.IdleLabel)
 	fmt.Fprintf(&b, "[fx]\n")
+	fmt.Fprintf(&b, "enabled = %t\n", c.FX.Enabled)
+	fmt.Fprintf(&b, "idle_enabled = %t\n", c.FX.IdleEnabled)
+	fmt.Fprintf(&b, "input_device = %q\n", c.FX.InputDevice)
+	fmt.Fprintf(&b, "output_device = %q\n", c.FX.OutputDevice)
+	fmt.Fprintf(&b, "width = %d\n", c.FX.Width)
+	fmt.Fprintf(&b, "height = %d\n", c.FX.Height)
+	fmt.Fprintf(&b, "fps = %d\n", c.FX.FPS)
 	fmt.Fprintf(&b, "sdk_path = %q\n", c.FX.SDKPath)
 	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
 	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
@@ -281,6 +302,34 @@ func assign(cfg *Config, section, key, raw string) error {
 	case "capture.idle_label":
 		v, err := parseString(raw)
 		cfg.Capture.IdleLabel = v
+		return err
+	case "fx.enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.Enabled = v
+		return err
+	case "fx.idle_enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.FX.IdleEnabled = v
+		return err
+	case "fx.input_device":
+		v, err := parseString(raw)
+		cfg.FX.InputDevice = v
+		return err
+	case "fx.output_device":
+		v, err := parseString(raw)
+		cfg.FX.OutputDevice = v
+		return err
+	case "fx.width":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.Width = v
+		return err
+	case "fx.height":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.Height = v
+		return err
+	case "fx.fps":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.FPS = v
 		return err
 	case "fx.sdk_path":
 		v, err := parseString(raw)

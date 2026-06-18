@@ -25,6 +25,9 @@ struct Options {
   std::string input;
   std::string mask;
   std::string blur;
+  int width = 0;
+  int height = 0;
+  int fps = 25;
   float blurStrength = 0.75f;
 };
 
@@ -182,107 +185,147 @@ ImageBGR syntheticBGR() {
   return out;
 }
 
+class MaxineProcessor {
+public:
+  MaxineProcessor(const Options &opts, int width, int height)
+      : opts_(opts), width_(width), height_(height),
+        input_(static_cast<size_t>(width) * height * 3),
+        mask_(static_cast<size_t>(width) * height),
+        blurred_(static_cast<size_t>(width) * height * 3) {
+    init();
+  }
+
+  ~MaxineProcessor() { cleanup(); }
+
+  std::vector<unsigned char> &input() { return input_; }
+  std::vector<unsigned char> &mask() { return mask_; }
+  std::vector<unsigned char> &blurred() { return blurred_; }
+
+  void run() {
+    check(NvCVImage_Transfer(&cpuInput_, &gpuInput_, 1.0f, stream_, &staging_),
+          "NvCVImage_Transfer(input CPU->GPU)");
+    check(NvVFX_Run(green_, 0), "NvVFX_Run(GreenScreen)");
+    check(NvVFX_CudaStreamSynchronize(stream_), "NvVFX_CudaStreamSynchronize(GreenScreen)");
+    check(NvVFX_Run(blur_, 0), "NvVFX_Run(BackgroundBlur)");
+    check(NvVFX_CudaStreamSynchronize(stream_), "NvVFX_CudaStreamSynchronize(BackgroundBlur)");
+    check(NvCVImage_Transfer(&gpuMask_, &cpuMask_, 1.0f, stream_, &staging_),
+          "NvCVImage_Transfer(mask GPU->CPU)");
+    check(NvCVImage_Transfer(&gpuBlur_, &cpuBlur_, 1.0f, stream_, &staging_),
+          "NvCVImage_Transfer(blur GPU->CPU)");
+    check(NvVFX_CudaStreamSynchronize(stream_), "NvVFX_CudaStreamSynchronize(output copies)");
+  }
+
+private:
+  void init() {
+    check(NvVFX_CudaStreamCreate(&stream_), "NvVFX_CudaStreamCreate");
+    check(NvVFX_CreateEffect(NVVFX_FX_GREEN_SCREEN, &green_), "NvVFX_CreateEffect(GreenScreen)");
+    check(NvVFX_SetString(green_, NVVFX_MODEL_DIRECTORY, opts_.modelDir.c_str()),
+          "NvVFX_SetString(GreenScreen ModelDir)");
+    check(NvVFX_SetCudaStream(green_, NVVFX_CUDA_STREAM, stream_),
+          "NvVFX_SetCudaStream(GreenScreen)");
+    check(NvVFX_SetU32(green_, NVVFX_MODE, 0), "NvVFX_SetU32(GreenScreen Mode)");
+    check(NvVFX_SetU32(green_, NVVFX_MAX_INPUT_WIDTH, width_),
+          "NvVFX_SetU32(GreenScreen MaxInputWidth)");
+    check(NvVFX_SetU32(green_, NVVFX_MAX_INPUT_HEIGHT, height_),
+          "NvVFX_SetU32(GreenScreen MaxInputHeight)");
+
+    check(NvCVImage_Init(&cpuInput_, width_, height_, width_ * 3,
+                         input_.data(), NVCV_BGR, NVCV_U8, NVCV_INTERLEAVED,
+                         NVCV_CPU),
+          "NvCVImage_Init(cpu input)");
+    check(NvCVImage_Init(&cpuMask_, width_, height_, width_, mask_.data(),
+                         NVCV_A, NVCV_U8, NVCV_INTERLEAVED, NVCV_CPU),
+          "NvCVImage_Init(cpu mask)");
+    check(NvCVImage_Init(&cpuBlur_, width_, height_, width_ * 3,
+                         blurred_.data(), NVCV_BGR, NVCV_U8, NVCV_INTERLEAVED,
+                         NVCV_CPU),
+          "NvCVImage_Init(cpu blur)");
+    check(NvCVImage_Alloc(&gpuInput_, width_, height_, NVCV_BGR, NVCV_U8,
+                          NVCV_INTERLEAVED, NVCV_GPU, 0),
+          "NvCVImage_Alloc(gpu input)");
+    check(NvCVImage_Alloc(&gpuMask_, width_, height_, NVCV_A, NVCV_U8,
+                          NVCV_INTERLEAVED, NVCV_GPU, 0),
+          "NvCVImage_Alloc(gpu mask)");
+    check(NvCVImage_Alloc(&gpuBlur_, width_, height_, NVCV_BGR, NVCV_U8,
+                          NVCV_INTERLEAVED, NVCV_GPU, 0),
+          "NvCVImage_Alloc(gpu blur)");
+
+    check(NvVFX_SetImage(green_, NVVFX_INPUT_IMAGE, &gpuInput_),
+          "NvVFX_SetImage(GreenScreen input)");
+    check(NvVFX_SetImage(green_, NVVFX_OUTPUT_IMAGE, &gpuMask_),
+          "NvVFX_SetImage(GreenScreen output)");
+    check(NvVFX_Load(green_), "NvVFX_Load(GreenScreen)");
+    check(NvVFX_AllocateState(green_, &greenState_), "NvVFX_AllocateState(GreenScreen)");
+    check(NvVFX_SetStateObjectHandleArray(green_, NVVFX_STATE, &greenState_),
+          "NvVFX_SetStateObjectHandleArray(GreenScreen)");
+
+    check(NvVFX_CreateEffect(NVVFX_FX_BGBLUR, &blur_), "NvVFX_CreateEffect(BackgroundBlur)");
+    check(NvVFX_SetCudaStream(blur_, NVVFX_CUDA_STREAM, stream_),
+          "NvVFX_SetCudaStream(BackgroundBlur)");
+    check(NvVFX_SetF32(blur_, NVVFX_STRENGTH, opts_.blurStrength),
+          "NvVFX_SetF32(BackgroundBlur Strength)");
+    check(NvVFX_SetImage(blur_, NVVFX_INPUT_IMAGE, &gpuInput_),
+          "NvVFX_SetImage(BackgroundBlur input)");
+    check(NvVFX_SetImage(blur_, NVVFX_INPUT_IMAGE_1, &gpuMask_),
+          "NvVFX_SetImage(BackgroundBlur mask)");
+    check(NvVFX_SetImage(blur_, NVVFX_OUTPUT_IMAGE, &gpuBlur_),
+          "NvVFX_SetImage(BackgroundBlur output)");
+    check(NvVFX_Load(blur_), "NvVFX_Load(BackgroundBlur)");
+  }
+
+  void cleanup() {
+    NvCVImage_Dealloc(&staging_);
+    NvCVImage_Dealloc(&gpuBlur_);
+    NvCVImage_Dealloc(&gpuMask_);
+    NvCVImage_Dealloc(&gpuInput_);
+    if (blur_) {
+      NvVFX_DestroyEffect(blur_);
+      blur_ = nullptr;
+    }
+    if (greenState_) {
+      NvVFX_DeallocateState(green_, greenState_);
+      greenState_ = nullptr;
+    }
+    if (green_) {
+      NvVFX_DestroyEffect(green_);
+      green_ = nullptr;
+    }
+    if (stream_) {
+      NvVFX_CudaStreamDestroy(stream_);
+      stream_ = nullptr;
+    }
+  }
+
+  Options opts_;
+  int width_ = 0;
+  int height_ = 0;
+  std::vector<unsigned char> input_;
+  std::vector<unsigned char> mask_;
+  std::vector<unsigned char> blurred_;
+  CUstream stream_ = nullptr;
+  NvVFX_Handle green_ = nullptr;
+  NvVFX_Handle blur_ = nullptr;
+  NvVFX_StateObjectHandle greenState_ = nullptr;
+  NvCVImage cpuInput_{};
+  NvCVImage cpuMask_{};
+  NvCVImage cpuBlur_{};
+  NvCVImage gpuInput_{};
+  NvCVImage gpuMask_{};
+  NvCVImage gpuBlur_{};
+  NvCVImage staging_{};
+};
+
 void runGreenScreenAndBlur(const Options &opts, const ImageBGR &input,
                            const std::string &maskPath,
                            const std::string &blurPath) {
-  CUstream stream = nullptr;
-  NvVFX_Handle green = nullptr;
-  NvVFX_Handle blur = nullptr;
-  NvVFX_StateObjectHandle greenState = nullptr;
-  NvCVImage cpuInput{};
-  NvCVImage cpuMask{};
-  NvCVImage cpuBlur{};
-  NvCVImage gpuInput{};
-  NvCVImage gpuMask{};
-  NvCVImage gpuBlur{};
-  NvCVImage staging{};
-
-  std::vector<unsigned char> mask(static_cast<size_t>(input.width) * input.height);
-  std::vector<unsigned char> blurred(static_cast<size_t>(input.width) * input.height * 3);
-
-  check(NvVFX_CudaStreamCreate(&stream), "NvVFX_CudaStreamCreate");
-  check(NvVFX_CreateEffect(NVVFX_FX_GREEN_SCREEN, &green), "NvVFX_CreateEffect(GreenScreen)");
-  check(NvVFX_SetString(green, NVVFX_MODEL_DIRECTORY, opts.modelDir.c_str()),
-        "NvVFX_SetString(GreenScreen ModelDir)");
-  check(NvVFX_SetCudaStream(green, NVVFX_CUDA_STREAM, stream), "NvVFX_SetCudaStream(GreenScreen)");
-  check(NvVFX_SetU32(green, NVVFX_MODE, 0), "NvVFX_SetU32(GreenScreen Mode)");
-  check(NvVFX_SetU32(green, NVVFX_MAX_INPUT_WIDTH, input.width),
-        "NvVFX_SetU32(GreenScreen MaxInputWidth)");
-  check(NvVFX_SetU32(green, NVVFX_MAX_INPUT_HEIGHT, input.height),
-        "NvVFX_SetU32(GreenScreen MaxInputHeight)");
-
-  check(NvCVImage_Init(&cpuInput, input.width, input.height, input.width * 3,
-                       const_cast<unsigned char *>(input.pixels.data()), NVCV_BGR,
-                       NVCV_U8, NVCV_INTERLEAVED, NVCV_CPU),
-        "NvCVImage_Init(cpu input)");
-  check(NvCVImage_Init(&cpuMask, input.width, input.height, input.width,
-                       mask.data(), NVCV_A, NVCV_U8, NVCV_INTERLEAVED, NVCV_CPU),
-        "NvCVImage_Init(cpu mask)");
-  check(NvCVImage_Init(&cpuBlur, input.width, input.height, input.width * 3,
-                       blurred.data(), NVCV_BGR, NVCV_U8, NVCV_INTERLEAVED,
-                       NVCV_CPU),
-        "NvCVImage_Init(cpu blur)");
-  check(NvCVImage_Alloc(&gpuInput, input.width, input.height, NVCV_BGR, NVCV_U8,
-                        NVCV_INTERLEAVED, NVCV_GPU, 0),
-        "NvCVImage_Alloc(gpu input)");
-  check(NvCVImage_Alloc(&gpuMask, input.width, input.height, NVCV_A, NVCV_U8,
-                        NVCV_INTERLEAVED, NVCV_GPU, 0),
-        "NvCVImage_Alloc(gpu mask)");
-  check(NvCVImage_Alloc(&gpuBlur, input.width, input.height, NVCV_BGR, NVCV_U8,
-                        NVCV_INTERLEAVED, NVCV_GPU, 0),
-        "NvCVImage_Alloc(gpu blur)");
-
-  check(NvVFX_SetImage(green, NVVFX_INPUT_IMAGE, &gpuInput), "NvVFX_SetImage(GreenScreen input)");
-  check(NvVFX_SetImage(green, NVVFX_OUTPUT_IMAGE, &gpuMask), "NvVFX_SetImage(GreenScreen output)");
-  check(NvVFX_Load(green), "NvVFX_Load(GreenScreen)");
-  check(NvVFX_AllocateState(green, &greenState), "NvVFX_AllocateState(GreenScreen)");
-  check(NvVFX_SetStateObjectHandleArray(green, NVVFX_STATE, &greenState),
-        "NvVFX_SetStateObjectHandleArray(GreenScreen)");
-
-  check(NvCVImage_Transfer(&cpuInput, &gpuInput, 1.0f, stream, &staging),
-        "NvCVImage_Transfer(input CPU->GPU)");
-  check(NvVFX_Run(green, 0), "NvVFX_Run(GreenScreen)");
-  check(NvVFX_CudaStreamSynchronize(stream), "NvVFX_CudaStreamSynchronize(GreenScreen)");
-
-  check(NvVFX_CreateEffect(NVVFX_FX_BGBLUR, &blur), "NvVFX_CreateEffect(BackgroundBlur)");
-  check(NvVFX_SetCudaStream(blur, NVVFX_CUDA_STREAM, stream), "NvVFX_SetCudaStream(BackgroundBlur)");
-  check(NvVFX_SetF32(blur, NVVFX_STRENGTH, opts.blurStrength),
-        "NvVFX_SetF32(BackgroundBlur Strength)");
-  check(NvVFX_SetImage(blur, NVVFX_INPUT_IMAGE, &gpuInput), "NvVFX_SetImage(BackgroundBlur input)");
-  check(NvVFX_SetImage(blur, NVVFX_INPUT_IMAGE_1, &gpuMask), "NvVFX_SetImage(BackgroundBlur mask)");
-  check(NvVFX_SetImage(blur, NVVFX_OUTPUT_IMAGE, &gpuBlur), "NvVFX_SetImage(BackgroundBlur output)");
-  check(NvVFX_Load(blur), "NvVFX_Load(BackgroundBlur)");
-  check(NvVFX_Run(blur, 0), "NvVFX_Run(BackgroundBlur)");
-  check(NvVFX_CudaStreamSynchronize(stream), "NvVFX_CudaStreamSynchronize(BackgroundBlur)");
-
-  check(NvCVImage_Transfer(&gpuMask, &cpuMask, 1.0f, stream, &staging),
-        "NvCVImage_Transfer(mask GPU->CPU)");
-  check(NvCVImage_Transfer(&gpuBlur, &cpuBlur, 1.0f, stream, &staging),
-        "NvCVImage_Transfer(blur GPU->CPU)");
-  check(NvVFX_CudaStreamSynchronize(stream), "NvVFX_CudaStreamSynchronize(output copies)");
-
+  MaxineProcessor processor(opts, input.width, input.height);
+  processor.input() = input.pixels;
+  processor.run();
   if (!maskPath.empty()) {
-    writePGM(maskPath, mask, input.width, input.height);
+    writePGM(maskPath, processor.mask(), input.width, input.height);
   }
   if (!blurPath.empty()) {
-    writePPMFromBGR(blurPath, blurred, input.width, input.height);
-  }
-
-  NvCVImage_Dealloc(&staging);
-  NvCVImage_Dealloc(&gpuBlur);
-  NvCVImage_Dealloc(&gpuMask);
-  NvCVImage_Dealloc(&gpuInput);
-  if (blur) {
-    NvVFX_DestroyEffect(blur);
-  }
-  if (greenState) {
-    NvVFX_DeallocateState(green, greenState);
-  }
-  if (green) {
-    NvVFX_DestroyEffect(green);
-  }
-  if (stream) {
-    NvVFX_CudaStreamDestroy(stream);
+    writePPMFromBGR(blurPath, processor.blurred(), input.width, input.height);
   }
 }
 
@@ -296,6 +339,18 @@ Options optionsFromFlags(const std::map<std::string, std::string> &flags) {
   const std::string strength = flag(flags, "blur-strength");
   if (!strength.empty()) {
     opts.blurStrength = std::strtof(strength.c_str(), nullptr);
+  }
+  const std::string width = flag(flags, "width");
+  if (!width.empty()) {
+    opts.width = std::atoi(width.c_str());
+  }
+  const std::string height = flag(flags, "height");
+  if (!height.empty()) {
+    opts.height = std::atoi(height.c_str());
+  }
+  const std::string fps = flag(flags, "fps");
+  if (!fps.empty()) {
+    opts.fps = std::atoi(fps.c_str());
   }
   return opts;
 }
@@ -328,6 +383,46 @@ void testImage(const Options &opts) {
   std::printf("blur=%s\n", opts.blur.c_str());
 }
 
+bool readExact(FILE *f, std::vector<unsigned char> &buf) {
+  size_t got = 0;
+  while (got < buf.size()) {
+    size_t n = std::fread(buf.data() + got, 1, buf.size() - got, f);
+    if (n == 0) {
+      if (std::feof(f) && got == 0) {
+        return false;
+      }
+      fail("short raw frame read");
+    }
+    got += n;
+  }
+  return true;
+}
+
+void writeExact(FILE *f, const std::vector<unsigned char> &buf) {
+  size_t written = 0;
+  while (written < buf.size()) {
+    size_t n = std::fwrite(buf.data() + written, 1, buf.size() - written, f);
+    if (n == 0) {
+      fail("raw frame write failed");
+    }
+    written += n;
+  }
+  std::fflush(f);
+}
+
+void stream(const Options &opts) {
+  if (opts.width < 512 || opts.height < 288) {
+    std::fprintf(stderr, "error: --width/--height must be at least 512x288, got %dx%d\n",
+                 opts.width, opts.height);
+    std::exit(1);
+  }
+  MaxineProcessor processor(opts, opts.width, opts.height);
+  while (readExact(stdin, processor.input())) {
+    processor.run();
+    writeExact(stdout, processor.blurred());
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -346,6 +441,10 @@ int main(int argc, char **argv) {
   }
   if (command == "test-image") {
     testImage(opts);
+    return 0;
+  }
+  if (command == "stream") {
+    stream(opts);
     return 0;
   }
 

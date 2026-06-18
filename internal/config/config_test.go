@@ -24,6 +24,12 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`exclusive_caps = true`,
 		`input_command = "gphoto2 --stdout --capture-movie"`,
 		`idle_label = "nv-vcam idling ..."`,
+		`idle_enabled = true`,
+		`input_device = "/dev/video10"`,
+		`output_device = "/dev/video20"`,
+		`width = 2560`,
+		`height = 1440`,
+		`fps = 25`,
 		`sdk_path = "/usr/local/VideoFX"`,
 		`model_dir = "/usr/local/VideoFX/lib/models"`,
 		`enable_os_release_shim = true`,
@@ -47,6 +53,9 @@ func TestRenderAndParseDefault(t *testing.T) {
 	}
 	if !parsed.Capture.Enabled || parsed.Capture.Device != "/dev/video10" || parsed.Capture.Width != 2560 {
 		t.Fatalf("unexpected parsed capture config: %+v", parsed.Capture)
+	}
+	if !parsed.FX.Enabled || !parsed.FX.IdleEnabled || parsed.FX.InputDevice != "/dev/video10" || parsed.FX.OutputDevice != "/dev/video20" || parsed.FX.Width != 2560 || parsed.FX.Height != 1440 || parsed.FX.FPS != 25 {
+		t.Fatalf("unexpected parsed fx stream config: %+v", parsed.FX)
 	}
 	if parsed.FX.SDKPath != "/usr/local/VideoFX" || parsed.FX.ModelDir != "/usr/local/VideoFX/lib/models" || !parsed.FX.EnableOSReleaseShim || parsed.FX.BlurStrength != 0.75 {
 		t.Fatalf("unexpected parsed fx config: %+v", parsed.FX)

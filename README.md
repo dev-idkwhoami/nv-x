@@ -2,7 +2,7 @@
 
 `nv-vcam` is a native Linux "NVIDIA Broadcast-lite" virtual camera manager and effects service.
 
-The current milestone is v0.1.0 RAW-first plus early Maxine FX validation: a Go CLI and Wails app that manage config files, inspect camera devices, write safe `v4l2loopback` configuration, control a systemd user service, supervise a Sony RAW capture pipeline, and validate NVIDIA Maxine still-image effects before realtime video integration.
+The current milestone is v0.1.0 RAW-first plus early Maxine FX: a Go CLI and Wails app that manage config files, inspect camera devices, write safe `v4l2loopback` configuration, control a systemd user service, supervise a Sony RAW capture pipeline, validate NVIDIA Maxine still-image effects, and run an on-demand background blur stream.
 
 ## Current Milestone
 
@@ -10,8 +10,8 @@ The current milestone is v0.1.0 RAW-first plus early Maxine FX validation: a Go 
 - Go service packages and CLI under the root module.
 - Wails desktop app under `app/`.
 - RAW Sony capture supervision through `gphoto2` and `ffmpeg`.
-- No realtime FX streaming yet.
-- Maxine FX validation is available for still images only.
+- On-demand realtime Maxine background blur from `/dev/video10` to `/dev/video20`.
+- Maxine still-image validation commands.
 
 ## Intended Topology
 
@@ -29,7 +29,7 @@ The current working flow targets `/dev/video10` as the RAW camera. The service k
 ## Non-goals For This Milestone
 
 - No ONNX, OpenCV, or RNNoise integration.
-- No realtime background blur or replacement service yet.
+- No background replacement service yet.
 - No GUI camera preview yet; validate feeds in a real browser or video app.
 - No Docker.
 - No Python.
@@ -127,7 +127,21 @@ nv-vcam fx test-image --input ./input.jpg --blur-output ./blur.png --removed-out
 
 On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-vcam` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.
 
-Realtime FX streaming is intentionally not wired yet. The still-image commands are the validation step before connecting Maxine to `/dev/video10 -> /dev/video20`.
+Realtime FX streaming is available as the first background blur path:
+
+```bash
+nv-vcam fx stream --input /dev/video10 --output /dev/video20
+```
+
+The normal service path runs the same pipeline on demand. `nv-vcam run` keeps an idle stream attached to `/dev/video20` so applications can discover "Sony Camera FX". When an external app opens `/dev/video20`, the FX supervisor starts:
+
+```text
+ffmpeg /dev/video10 -> raw bgr24
+  -> nv-vcam-maxine-helper stream
+  -> ffmpeg raw bgr24 -> yuv420p -> /dev/video20
+```
+
+The FX pipeline opening `/dev/video10` acts as a RAW consumer, so the existing RAW capture supervisor starts the Sony camera feed automatically. Closing the FX consumer stops Maxine after the configured idle timeout and returns `/dev/video20` to the lightweight idle stream.
 
 ## RAW Capture Service
 
