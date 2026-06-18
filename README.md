@@ -42,6 +42,7 @@ Runtime:
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - `gphoto2` for Sony camera capture.
 - `ffmpeg` with V4L2 output support.
+- `onnxruntime-cuda` for FX model inference on CUDA.
 - `pkexec`/polkit for GUI loopback write/reload elevation.
 - `fuser` from `psmisc` is optional but useful for troubleshooting busy devices.
 
@@ -55,7 +56,7 @@ Build:
 Arch/CachyOS package names are typically:
 
 ```bash
-sudo pacman -S --needed go bun ffmpeg gphoto2 v4l2loopback-dkms psmisc polkit
+sudo pacman -S --needed go bun ffmpeg gphoto2 v4l2loopback-dkms psmisc polkit onnxruntime-cuda
 ```
 
 Install the kernel headers that match `uname -r`; on CachyOS this may be a CachyOS-specific headers package rather than plain `linux-headers`.
@@ -109,10 +110,11 @@ nv-vcam service status
 The `features/camera-fx` branch starts FX work with a still-image command before realtime video integration:
 
 ```bash
+nv-vcam fx doctor
 nv-vcam fx test-image --input ./input.jpg --output ./out.png --mask ./mask.png
 ```
 
-This first command validates image loading, mask output, and compositing paths with a deterministic placeholder CPU mask. The CUDA/model runtime is intentionally the next step, after the command shape and output files are stable.
+`nv-vcam fx doctor` validates the ONNX Runtime shared library and CUDA execution provider without loading a model. `nv-vcam fx test-image` currently validates image loading, mask output, and compositing paths with a deterministic placeholder CPU mask. Real model inference is the next step after the runtime check is green.
 
 ## RAW Capture Service
 

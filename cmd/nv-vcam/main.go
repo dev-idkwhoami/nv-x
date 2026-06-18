@@ -69,6 +69,7 @@ func usage() {
   nv-vcam loopback reload [--dry-run]
   nv-vcam service install [--force] [--dry-run] [--enable] [--start]
   nv-vcam service start|stop|restart|status [--dry-run]
+  nv-vcam fx doctor
   nv-vcam fx test-image --input path --output path [--mask path]
   nv-vcam run`)
 }
@@ -78,6 +79,22 @@ func fxCmd(args []string) error {
 		return errors.New("fx requires test-image")
 	}
 	switch args[0] {
+	case "doctor":
+		cfg := loadEffectiveConfig()
+		result := fx.Doctor(cfg)
+		fmt.Println("fx doctor")
+		fmt.Printf("onnxruntime: %s\n", result.RuntimeLibraryPath)
+		fmt.Printf("provider: %s\n", result.Provider)
+		fmt.Printf("device_id: %d\n", result.DeviceID)
+		fmt.Printf("runtime_ok: %t\n", result.RuntimeOK)
+		fmt.Printf("cuda_provider_ok: %t\n", result.CUDAProviderOK)
+		fmt.Printf("model: %s\n", result.ModelPath)
+		fmt.Printf("model_exists: %t\n", result.ModelExists)
+		fmt.Printf("message: %s\n", result.Message)
+		if !result.RuntimeOK || (strings.EqualFold(result.Provider, "cuda") && !result.CUDAProviderOK) {
+			return errors.New("fx runtime check failed")
+		}
+		return nil
 	case "test-image":
 		fs := flag.NewFlagSet("fx test-image", flag.ContinueOnError)
 		input := fs.String("input", "", "input image path")

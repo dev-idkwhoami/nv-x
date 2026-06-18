@@ -24,6 +24,8 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`exclusive_caps = true`,
 		`input_command = "gphoto2 --stdout --capture-movie"`,
 		`idle_label = "nv-vcam idling ..."`,
+		`onnxruntime_library_path = "/usr/lib/libonnxruntime.so"`,
+		`provider = "cuda"`,
 		`theme = "system"`,
 	} {
 		if !strings.Contains(rendered, want) {
@@ -43,6 +45,9 @@ func TestRenderAndParseDefault(t *testing.T) {
 	}
 	if !parsed.Capture.Enabled || parsed.Capture.Device != "/dev/video10" || parsed.Capture.Width != 2560 {
 		t.Fatalf("unexpected parsed capture config: %+v", parsed.Capture)
+	}
+	if parsed.FX.Provider != "cuda" || parsed.FX.DeviceID != 0 {
+		t.Fatalf("unexpected parsed fx config: %+v", parsed.FX)
 	}
 }
 

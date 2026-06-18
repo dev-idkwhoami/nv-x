@@ -15,6 +15,7 @@ type Config struct {
 	Output   OutputConfig
 	Loopback LoopbackConfig
 	Capture  CaptureConfig
+	FX       FXConfig
 	Service  ServiceConfig
 	UI       UIConfig
 }
@@ -46,6 +47,13 @@ type CaptureConfig struct {
 	UseCUDAScale       bool
 	IdleTimeoutSeconds int
 	IdleLabel          string
+}
+
+type FXConfig struct {
+	ONNXRuntimeLibraryPath string
+	ModelPath              string
+	Provider               string
+	DeviceID               int
 }
 
 type ServiceConfig struct {
@@ -83,6 +91,12 @@ func Default() Config {
 			UseCUDAScale:       true,
 			IdleTimeoutSeconds: 15,
 			IdleLabel:          "nv-vcam idling ...",
+		},
+		FX: FXConfig{
+			ONNXRuntimeLibraryPath: "/usr/lib/libonnxruntime.so",
+			ModelPath:              "~/.local/share/nv-vcam/models/person-segmentation.onnx",
+			Provider:               "cuda",
+			DeviceID:               0,
 		},
 		Service: ServiceConfig{
 			Name:     "nv-vcam.service",
@@ -154,6 +168,11 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "use_cuda_scale = %t\n", c.Capture.UseCUDAScale)
 	fmt.Fprintf(&b, "idle_timeout_seconds = %d\n", c.Capture.IdleTimeoutSeconds)
 	fmt.Fprintf(&b, "idle_label = %q\n\n", c.Capture.IdleLabel)
+	fmt.Fprintf(&b, "[fx]\n")
+	fmt.Fprintf(&b, "onnxruntime_library_path = %q\n", c.FX.ONNXRuntimeLibraryPath)
+	fmt.Fprintf(&b, "model_path = %q\n", c.FX.ModelPath)
+	fmt.Fprintf(&b, "provider = %q\n", c.FX.Provider)
+	fmt.Fprintf(&b, "device_id = %d\n\n", c.FX.DeviceID)
 	fmt.Fprintf(&b, "[service]\n")
 	fmt.Fprintf(&b, "name = %q\n", c.Service.Name)
 	fmt.Fprintf(&b, "exec_path = %q\n\n", c.Service.ExecPath)
@@ -262,6 +281,22 @@ func assign(cfg *Config, section, key, raw string) error {
 	case "capture.idle_label":
 		v, err := parseString(raw)
 		cfg.Capture.IdleLabel = v
+		return err
+	case "fx.onnxruntime_library_path":
+		v, err := parseString(raw)
+		cfg.FX.ONNXRuntimeLibraryPath = v
+		return err
+	case "fx.model_path":
+		v, err := parseString(raw)
+		cfg.FX.ModelPath = v
+		return err
+	case "fx.provider":
+		v, err := parseString(raw)
+		cfg.FX.Provider = v
+		return err
+	case "fx.device_id":
+		v, err := strconv.Atoi(raw)
+		cfg.FX.DeviceID = v
 		return err
 	case "service.name":
 		v, err := parseString(raw)

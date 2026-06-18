@@ -81,6 +81,24 @@ export namespace config {
 	        this.ExecPath = source["ExecPath"];
 	    }
 	}
+	export class FXConfig {
+	    ONNXRuntimeLibraryPath: string;
+	    ModelPath: string;
+	    Provider: string;
+	    DeviceID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FXConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ONNXRuntimeLibraryPath = source["ONNXRuntimeLibraryPath"];
+	        this.ModelPath = source["ModelPath"];
+	        this.Provider = source["Provider"];
+	        this.DeviceID = source["DeviceID"];
+	    }
+	}
 	export class LoopbackConfig {
 	    ConfigPath: string;
 	    ExclusiveCaps: boolean;
@@ -132,6 +150,7 @@ export namespace config {
 	    Output: OutputConfig;
 	    Loopback: LoopbackConfig;
 	    Capture: CaptureConfig;
+	    FX: FXConfig;
 	    Service: ServiceConfig;
 	    UI: UIConfig;
 	
@@ -145,6 +164,7 @@ export namespace config {
 	        this.Output = this.convertValues(source["Output"], OutputConfig);
 	        this.Loopback = this.convertValues(source["Loopback"], LoopbackConfig);
 	        this.Capture = this.convertValues(source["Capture"], CaptureConfig);
+	        this.FX = this.convertValues(source["FX"], FXConfig);
 	        this.Service = this.convertValues(source["Service"], ServiceConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
 	    }
@@ -167,6 +187,7 @@ export namespace config {
 		    return a;
 		}
 	}
+	
 	
 	
 	
