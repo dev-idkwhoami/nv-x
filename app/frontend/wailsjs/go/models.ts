@@ -1,58 +1,23 @@
-export namespace capture {
-
-	export class Snapshot {
-	    state: string;
-	    device: string;
-	    dependencies: string[];
-	    consumers: number;
-	    message: string;
-	    updatedAt: string;
-
-	    static createFrom(source: any = {}) {
-	        return new Snapshot(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.state = source["state"];
-	        this.device = source["device"];
-	        this.dependencies = source["dependencies"];
-	        this.consumers = source["consumers"];
-	        this.message = source["message"];
-	        this.updatedAt = source["updatedAt"];
-	    }
-	}
-
-}
-
 export namespace config {
 
-	export class CaptureConfig {
-	    Enabled: boolean;
-	    InputCommand: string;
-	    Device: string;
-	    FPS: number;
+	export class CameraConfig {
+	    InputDevice: string;
+	    InputFormat: string;
 	    Width: number;
 	    Height: number;
-	    UseCUDAScale: boolean;
-	    IdleTimeoutSeconds: number;
-	    IdleLabel: string;
+	    FPS: number;
 
 	    static createFrom(source: any = {}) {
-	        return new CaptureConfig(source);
+	        return new CameraConfig(source);
 	    }
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Enabled = source["Enabled"];
-	        this.InputCommand = source["InputCommand"];
-	        this.Device = source["Device"];
-	        this.FPS = source["FPS"];
+	        this.InputDevice = source["InputDevice"];
+	        this.InputFormat = source["InputFormat"];
 	        this.Width = source["Width"];
 	        this.Height = source["Height"];
-	        this.UseCUDAScale = source["UseCUDAScale"];
-	        this.IdleTimeoutSeconds = source["IdleTimeoutSeconds"];
-	        this.IdleLabel = source["IdleLabel"];
+	        this.FPS = source["FPS"];
 	    }
 	}
 	export class UIConfig {
@@ -83,13 +48,7 @@ export namespace config {
 	}
 	export class FXConfig {
 	    Enabled: boolean;
-	    IdleEnabled: boolean;
-	    InputDevice: string;
-	    OutputDevice: string;
-	    Width: number;
-	    Height: number;
-	    FPS: number;
-	    BackgroundMode: string;
+	    Mode: string;
 	    BackgroundImage: string;
 	    ChromaColor: string;
 	    SDKPath: string;
@@ -106,13 +65,7 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Enabled = source["Enabled"];
-	        this.IdleEnabled = source["IdleEnabled"];
-	        this.InputDevice = source["InputDevice"];
-	        this.OutputDevice = source["OutputDevice"];
-	        this.Width = source["Width"];
-	        this.Height = source["Height"];
-	        this.FPS = source["FPS"];
-	        this.BackgroundMode = source["BackgroundMode"];
+	        this.Mode = source["Mode"];
 	        this.BackgroundImage = source["BackgroundImage"];
 	        this.ChromaColor = source["ChromaColor"];
 	        this.SDKPath = source["SDKPath"];
@@ -143,6 +96,7 @@ export namespace config {
 	    Device: string;
 	    VideoNR: number;
 	    Label: string;
+	    OutputFormat: string;
 
 	    static createFrom(source: any = {}) {
 	        return new OutputConfig(source);
@@ -153,27 +107,13 @@ export namespace config {
 	        this.Device = source["Device"];
 	        this.VideoNR = source["VideoNR"];
 	        this.Label = source["Label"];
-	    }
-	}
-	export class InputConfig {
-	    Device: string;
-	    Label: string;
-
-	    static createFrom(source: any = {}) {
-	        return new InputConfig(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Device = source["Device"];
-	        this.Label = source["Label"];
+	        this.OutputFormat = source["OutputFormat"];
 	    }
 	}
 	export class Config {
-	    Input: InputConfig;
+	    Camera: CameraConfig;
 	    Output: OutputConfig;
 	    Loopback: LoopbackConfig;
-	    Capture: CaptureConfig;
 	    FX: FXConfig;
 	    Service: ServiceConfig;
 	    UI: UIConfig;
@@ -184,10 +124,9 @@ export namespace config {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Input = this.convertValues(source["Input"], InputConfig);
+	        this.Camera = this.convertValues(source["Camera"], CameraConfig);
 	        this.Output = this.convertValues(source["Output"], OutputConfig);
 	        this.Loopback = this.convertValues(source["Loopback"], LoopbackConfig);
-	        this.Capture = this.convertValues(source["Capture"], CaptureConfig);
 	        this.FX = this.convertValues(source["FX"], FXConfig);
 	        this.Service = this.convertValues(source["Service"], ServiceConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
@@ -211,7 +150,6 @@ export namespace config {
 		    return a;
 		}
 	}
-
 
 
 
@@ -337,7 +275,6 @@ export namespace main {
 	    expectedOutput: string;
 	    expectedOutputExists: boolean;
 	    configRendered: string;
-	    capture: capture.Snapshot;
 	    fx: fx.Snapshot;
 
 	    static createFrom(source: any = {}) {
@@ -356,7 +293,6 @@ export namespace main {
 	        this.expectedOutput = source["expectedOutput"];
 	        this.expectedOutputExists = source["expectedOutputExists"];
 	        this.configRendered = source["configRendered"];
-	        this.capture = this.convertValues(source["capture"], capture.Snapshot);
 	        this.fx = this.convertValues(source["fx"], fx.Snapshot);
 	    }
 

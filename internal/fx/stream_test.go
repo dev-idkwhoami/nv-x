@@ -7,70 +7,94 @@ import (
 	"nv-vcam/internal/config"
 )
 
-func TestFXInputFFmpegArgs(t *testing.T) {
-	opts := StreamOptions{
-		InputDevice:  "/dev/video10",
-		OutputDevice: "/dev/video20",
-		Width:        2560,
-		Height:       1440,
-		FPS:          25,
-	}
-	args := strings.Join(FXInputFFmpegArgs(opts), " ")
-	for _, want := range []string{
-		"-f v4l2",
-		"-framerate 25",
-		"-video_size 2560x1440",
-		"-i /dev/video10",
-		"format=bgr24",
-		"-pix_fmt bgr24",
-		"-f rawvideo -",
-	} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("expected %q in args:\n%s", want, args)
-		}
-	}
-}
-
-func TestFXOutputFFmpegArgs(t *testing.T) {
-	opts := StreamOptions{
-		OutputDevice: "/dev/video20",
-		Width:        2560,
-		Height:       1440,
-		FPS:          25,
-	}
-	args := strings.Join(FXOutputFFmpegArgs(opts), " ")
-	for _, want := range []string{
-		"-f rawvideo",
-		"-pix_fmt bgr24",
-		"-s 2560x1440",
-		"-r 25",
-		"format=yuv420p",
-		"-f v4l2 /dev/video20",
-	} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("expected %q in args:\n%s", want, args)
-		}
-	}
-}
-
-func TestNormalizeStreamOptionsUsesConfigDefaults(t *testing.T) {
+func TestNormalizeStreamOptionsUsesNativeDefaults(t *testing.T) {
 	cfg := config.Default()
 	opts := normalizeStreamOptions(cfg, StreamOptions{})
-	if opts.InputDevice != "/dev/video10" || opts.OutputDevice != "/dev/video20" {
-		t.Fatalf("unexpected devices: %+v", opts)
+	if opts.InputDevice != "/dev/video0" || opts.InputFormat != "nv12" {
+		t.Fatalf("unexpected input defaults: %+v", opts)
 	}
-	if opts.Width != 2560 || opts.Height != 1440 || opts.FPS != 25 || opts.BackgroundMode != "blur" || opts.BackgroundImage != "" || opts.ChromaColor != "#00ff00" || opts.BlurStrength != 0.75 || opts.DenoiseEnabled || opts.DenoiseStrength != 0 {
+	if opts.OutputDevice != "/dev/video10" || opts.OutputFormat != "yuv420p" {
+		t.Fatalf("unexpected output defaults: %+v", opts)
+	}
+	if opts.Width != 1920 || opts.Height != 1080 || opts.FPS != 50 || opts.BackgroundMode != "blur" || opts.BackgroundImage != "" || opts.ChromaColor != "#00ff00" || opts.BlurStrength != 0.75 || opts.DenoiseEnabled || opts.DenoiseStrength != 0 {
 		t.Fatalf("unexpected geometry/effect defaults: %+v", opts)
+	}
+}
+
+func TestNativeStreamHelperArgs(t *testing.T) {
+	args := strings.Join(NativeStreamHelperArgs(DoctorResult{
+		SDKPath:  "/opt/VideoFX",
+		ModelDir: "/opt/VideoFX/models",
+	}, StreamOptions{
+		InputDevice:     "/dev/video0",
+		InputFormat:     "nv12",
+		OutputDevice:    "/dev/video10",
+		OutputFormat:    "yuv420p",
+		Width:           1920,
+		Height:          1080,
+		FPS:             50,
+		BackgroundMode:  "chroma",
+		ChromaColor:     "#00ff00",
+		BlurStrength:    0.75,
+		DenoiseStrength: 0,
+	}, ""), " ")
+	for _, want := range []string{
+		"native-stream",
+		"--sdk-path /opt/VideoFX",
+		"--model-dir /opt/VideoFX/models",
+		"--input-device /dev/video0",
+		"--input-format nv12",
+		"--output-device /dev/video10",
+		"--output-format yuv420p",
+		"--width 1920",
+		"--height 1080",
+		"--fps 50",
+		"--background chroma",
+		"--chroma-color #00ff00",
+		"--blur-strength 0.750",
+		"--denoise 0",
+		"--denoise-strength 0",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected %q in args:\n%s", want, args)
+		}
+	}
+}
+
+func TestIdleOutputHelperArgs(t *testing.T) {
+	args := strings.Join(IdleOutputHelperArgs(DoctorResult{}, StreamOptions{
+		OutputDevice: "/dev/video10",
+		OutputFormat: "yuv420p",
+		Width:        1920,
+		Height:       1080,
+		FPS:          50,
+	}), " ")
+	for _, want := range []string{
+		"idle-output",
+		"--output-device /dev/video10",
+		"--output-format yuv420p",
+		"--width 1920",
+		"--height 1080",
+		"--fps 50",
+		"--idle-label NV-vCam idling ...",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected %q in args:\n%s", want, args)
+		}
 	}
 }
 
 func TestValidateStreamOptionsRejectsSmallFrames(t *testing.T) {
 	err := validateStreamOptions(StreamOptions{
-		InputDevice:  "/dev/video10",
-		OutputDevice: "/dev/video20",
-		Width:        320,
-		Height:       240,
-		FPS:          25,
+		InputDevice:    "/dev/video0",
+		InputFormat:    "nv12",
+		OutputDevice:   "/dev/video10",
+		OutputFormat:   "yuv420p",
+		Width:          320,
+		Height:         240,
+		FPS:            50,
+		BackgroundMode: "blur",
+		ChromaColor:    "#00ff00",
 	})
 	if err == nil {
 		t.Fatal("expected small frame size error")
@@ -78,77 +102,56 @@ func TestValidateStreamOptionsRejectsSmallFrames(t *testing.T) {
 }
 
 func TestValidateStreamOptionsRejectsInvalidEffects(t *testing.T) {
-	err := validateStreamOptions(StreamOptions{
-		InputDevice:     "/dev/video10",
-		OutputDevice:    "/dev/video20",
-		Width:           2560,
-		Height:          1440,
-		FPS:             25,
-		BackgroundMode:  "matte",
+	base := StreamOptions{
+		InputDevice:     "/dev/video0",
+		InputFormat:     "nv12",
+		OutputDevice:    "/dev/video10",
+		OutputFormat:    "yuv420p",
+		Width:           1920,
+		Height:          1080,
+		FPS:             50,
+		BackgroundMode:  "blur",
+		ChromaColor:     "#00ff00",
 		DenoiseStrength: 0,
-	})
-	if err == nil {
+	}
+	opts := base
+	opts.BackgroundMode = "matte"
+	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected invalid background mode error")
 	}
-	err = validateStreamOptions(StreamOptions{
-		InputDevice:    "/dev/video10",
-		OutputDevice:   "/dev/video20",
-		Width:          2560,
-		Height:         1440,
-		FPS:            25,
-		BackgroundMode: "replace",
-	})
-	if err == nil {
+	opts = base
+	opts.BackgroundMode = "replace"
+	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected missing replacement image error")
 	}
-	err = validateStreamOptions(StreamOptions{
-		InputDevice:     "/dev/video10",
-		OutputDevice:    "/dev/video20",
-		Width:           2560,
-		Height:          1440,
-		FPS:             25,
-		BackgroundMode:  "blur",
-		DenoiseStrength: 3,
-	})
-	if err == nil {
+	opts = base
+	opts.DenoiseStrength = 3
+	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected invalid denoise strength error")
 	}
-	err = validateStreamOptions(StreamOptions{
-		InputDevice:     "/dev/video10",
-		OutputDevice:    "/dev/video20",
-		Width:           2560,
-		Height:          1440,
-		FPS:             25,
-		BackgroundMode:  "chroma",
-		ChromaColor:     "00ff00",
-		DenoiseStrength: 0,
-	})
-	if err == nil {
+	opts = base
+	opts.BackgroundMode = "chroma"
+	opts.ChromaColor = "00ff00"
+	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected invalid chroma color error")
 	}
-	err = validateStreamOptions(StreamOptions{
-		InputDevice:     "/dev/video10",
-		OutputDevice:    "/dev/video20",
-		Width:           2560,
-		Height:          1440,
-		FPS:             25,
-		BackgroundMode:  "blur",
-		DenoiseEnabled:  true,
-		DenoiseStrength: 0,
-	})
-	if err == nil {
+	opts = base
+	opts.Height = 1440
+	opts.DenoiseEnabled = true
+	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected denoise max height error")
 	}
 }
 
-func TestInputOwnedPIDsMergesFXAndRAWOwnedPIDs(t *testing.T) {
-	supervisor := NewSupervisor(config.Default(), nil)
-	supervisor.owned = map[int]bool{100: true}
-	supervisor.SetInputIgnorePIDsFunc(func() map[int]bool {
-		return map[int]bool{200: true}
-	})
-	got := supervisor.inputOwnedPIDs()
-	if !got[100] || !got[200] || len(got) != 2 {
-		t.Fatalf("unexpected owned pid set: %#v", got)
+func TestValidateStreamOptionsRejectsUnsupportedFormats(t *testing.T) {
+	opts := normalizeStreamOptions(config.Default(), StreamOptions{})
+	opts.InputFormat = "mjpeg"
+	if err := validateStreamOptions(opts); err == nil {
+		t.Fatal("expected invalid input format error")
+	}
+	opts = normalizeStreamOptions(config.Default(), StreamOptions{})
+	opts.OutputFormat = "nv12"
+	if err := validateStreamOptions(opts); err == nil {
+		t.Fatal("expected invalid output format error")
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
 	"nv-vcam/internal/fx"
@@ -67,7 +66,6 @@ type AppStatus struct {
 	ExpectedOutput       string           `json:"expectedOutput"`
 	ExpectedOutputExists bool             `json:"expectedOutputExists"`
 	ConfigRendered       string           `json:"configRendered"`
-	Capture              capture.Snapshot `json:"capture"`
 	FX                   fx.Snapshot      `json:"fx"`
 }
 
@@ -89,20 +87,9 @@ func (a *App) GetStatus() AppStatus {
 		serviceErr = compactError(err)
 	}
 	_, loopbackErr := os.Stat(cfg.Loopback.ConfigPath)
-	captureSnapshot := capture.Snapshot{
-		State:        capture.StateDisabled,
-		Device:       cfg.Capture.Device,
-		Dependencies: capture.MissingDependencies(cfg),
-		Message:      "capture state file not found; start nv-vcam.service",
-	}
-	if statePath, err := capture.DefaultStatePath(); err == nil {
-		if snap, ok := capture.ReadState(statePath); ok {
-			captureSnapshot = snap
-		}
-	}
 	fxSnapshot := fx.Snapshot{
 		State:        fx.StateDisabled,
-		Device:       cfg.FX.OutputDevice,
+		Device:       cfg.Output.Device,
 		Dependencies: fx.MissingDependencies(cfg),
 		Message:      "fx state file not found; start nv-vcam.service",
 	}
@@ -124,12 +111,11 @@ func (a *App) GetStatus() AppStatus {
 			Error:  serviceErr,
 			Output: strings.TrimSpace(out),
 		},
-		ExpectedInput:        cfg.Input.Device,
-		ExpectedInputExists:  devices.DeviceExists(cfg.Input.Device),
+		ExpectedInput:        cfg.Camera.InputDevice,
+		ExpectedInputExists:  devices.DeviceExists(cfg.Camera.InputDevice),
 		ExpectedOutput:       cfg.Output.Device,
 		ExpectedOutputExists: devices.DeviceExists(cfg.Output.Device),
 		ConfigRendered:       config.Render(cfg),
-		Capture:              captureSnapshot,
 		FX:                   fxSnapshot,
 	}
 }
@@ -374,7 +360,8 @@ func (a *App) reloadLoopbackElevated(cfg config.Config) error {
 		if strings.TrimSpace(out) != "" {
 			fmt.Println(strings.TrimSpace(out))
 		}
-		return fmt.Errorf("%w\nfallback:\n  sudo modprobe -r v4l2loopback\n  sudo modprobe v4l2loopback\nif devices are busy, try: fuser -v /dev/video10 /dev/video20", err)
+		cfg := loadEffectiveConfig()
+		return fmt.Errorf("%w\nfallback:\n  sudo modprobe -r v4l2loopback\n  sudo modprobe v4l2loopback\nif devices are busy, try: fuser -v %s", err, cfg.Output.Device)
 	} else if strings.TrimSpace(out) != "" {
 		fmt.Println(strings.TrimSpace(out))
 	}

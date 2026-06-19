@@ -103,7 +103,7 @@ func Doctor(cfg config.Config) DoctorResult {
 		return result
 	}
 
-	doctorBackgroundMode := cfg.FX.BackgroundMode
+	doctorBackgroundMode := cfg.FX.Mode
 	if doctorBackgroundMode == "replace" {
 		doctorBackgroundMode = "blur"
 	}
@@ -142,7 +142,7 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 		opts.BlurStrength = cfg.FX.BlurStrength
 	}
 	if opts.BackgroundMode == "" {
-		opts.BackgroundMode = cfg.FX.BackgroundMode
+		opts.BackgroundMode = cfg.FX.Mode
 	}
 	if err := config.ValidateBackgroundMode(opts.BackgroundMode); err != nil {
 		return TestImageResult{}, err

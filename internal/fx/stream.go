@@ -40,7 +40,9 @@ type Snapshot struct {
 
 type StreamOptions struct {
 	InputDevice     string
+	InputFormat     string
 	OutputDevice    string
+	OutputFormat    string
 	Width           int
 	Height          int
 	FPS             int
@@ -53,10 +55,9 @@ type StreamOptions struct {
 }
 
 type Supervisor struct {
-	cfg             config.Config
-	procRoot        string
-	logf            func(string, ...any)
-	inputIgnorePIDs func() map[int]bool
+	cfg      config.Config
+	procRoot string
+	logf     func(string, ...any)
 
 	mu       sync.Mutex
 	state    State
@@ -77,10 +78,6 @@ func NewSupervisor(cfg config.Config, logf func(string, ...any)) *Supervisor {
 		state:    StateDisabled,
 		owned:    map[int]bool{},
 	}
-}
-
-func (s *Supervisor) SetInputIgnorePIDsFunc(fn func() map[int]bool) {
-	s.inputIgnorePIDs = fn
 }
 
 func (s *Supervisor) Snapshot() Snapshot {
@@ -109,13 +106,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	}
 
 	s.logf("fx supervisor started for %s", fxOutputDevice(s.cfg))
-	if s.cfg.FX.IdleEnabled {
-		if err := s.startIdle(ctx); err != nil {
-			s.setState(StateError, err.Error())
-			s.logf("fx idle stream failed: %v", err)
-		}
-	} else {
-		s.setState(StateIdle, "fx idle stream is disabled")
+	if err := s.startIdle(ctx); err != nil {
+		s.setState(StateError, err.Error())
+		s.logf("fx idle stream failed: %v", err)
 	}
 
 	ticker := time.NewTicker(time.Second)
@@ -132,7 +125,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			s.setConsumerCount(consumers)
 			switch s.stateValue() {
 			case StateIdle:
-				if s.currentExited() && s.cfg.FX.IdleEnabled {
+				if s.currentExited() {
 					s.logf("fx idle stream exited; restarting")
 					s.stopCurrent(time.Second)
 					if err := s.startIdle(ctx); err != nil {
@@ -163,51 +156,25 @@ func (s *Supervisor) Run(ctx context.Context) error {
 					}
 					continue
 				}
-				rawConsumers := capture.CountExternalConsumers(s.procRoot, fxInputDevice(s.cfg), s.inputOwnedPIDs())
-				if rawConsumers > 0 {
-					s.logf("direct RAW consumer detected on %s; returning FX to idle", fxInputDevice(s.cfg))
-					s.stopCurrent(2 * time.Second)
-					if s.cfg.FX.IdleEnabled {
-						if err := s.startIdle(ctx); err != nil {
-							s.setState(StateError, err.Error())
-							s.logf("fx idle restart failed: %v", err)
-						}
-					} else {
-						s.setState(StateIdle, "fx idle stream is disabled")
-					}
-					noConsumerSince = time.Time{}
-					continue
-				}
 				if noConsumerSince.IsZero() {
 					noConsumerSince = time.Now()
 					continue
 				}
-				timeout := time.Duration(s.cfg.Capture.IdleTimeoutSeconds) * time.Second
-				if timeout <= 0 {
-					timeout = 15 * time.Second
-				}
+				timeout := 2 * time.Second
 				if time.Since(noConsumerSince) >= timeout {
-					s.logf("no FX consumers for %s; returning to idle stream", timeout)
+					s.logf("no FX consumers for %s; stopping native stream", timeout)
 					s.stopCurrent(2 * time.Second)
-					if s.cfg.FX.IdleEnabled {
-						if err := s.startIdle(ctx); err != nil {
-							s.setState(StateError, err.Error())
-							s.logf("fx idle restart failed: %v", err)
-						}
-					} else {
-						s.setState(StateIdle, "fx idle stream is disabled")
+					if err := s.startIdle(ctx); err != nil {
+						s.setState(StateError, err.Error())
+						s.logf("fx idle restart failed: %v", err)
 					}
 					noConsumerSince = time.Time{}
 				}
 			case StateError:
 				if consumers == 0 {
 					s.stopCurrent(time.Second)
-					if s.cfg.FX.IdleEnabled {
-						if err := s.startIdle(ctx); err != nil {
-							s.setState(StateError, err.Error())
-						}
-					} else {
-						s.setState(StateIdle, "fx idle stream is disabled")
+					if err := s.startIdle(ctx); err != nil {
+						s.setState(StateError, err.Error())
 					}
 				}
 			}
@@ -217,9 +184,6 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 func MissingDependencies(cfg config.Config) []string {
 	var missing []string
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		missing = append(missing, "ffmpeg")
-	}
 	_, result := maxineEnv(cfg)
 	if result.HelperPath == "" {
 		missing = append(missing, "nv-vcam-maxine-helper")
@@ -271,73 +235,30 @@ func RunStream(ctx context.Context, cfg config.Config, opts StreamOptions, logf 
 	}
 }
 
-func FXInputFFmpegArgs(opts StreamOptions) []string {
-	return []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-fflags", "nobuffer",
-		"-flags", "low_delay",
-		"-f", "v4l2",
-		"-framerate", strconv.Itoa(opts.FPS),
-		"-video_size", fmt.Sprintf("%dx%d", opts.Width, opts.Height),
-		"-i", opts.InputDevice,
-		"-vf", "format=bgr24",
-		"-pix_fmt", "bgr24",
-		"-f", "rawvideo",
-		"-",
-	}
-}
-
-func FXOutputFFmpegArgs(opts StreamOptions) []string {
-	return []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-f", "rawvideo",
-		"-pix_fmt", "bgr24",
-		"-s", fmt.Sprintf("%dx%d", opts.Width, opts.Height),
-		"-r", strconv.Itoa(opts.FPS),
-		"-i", "-",
-		"-vf", "format=yuv420p",
-		"-pix_fmt", "yuv420p",
-		"-f", "v4l2",
-		opts.OutputDevice,
-	}
-}
-
-func FXIdleFFmpegArgs(cfg config.FXConfig) []string {
-	width, height, fps := fxGeometry(cfg)
-	return []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-re",
-		"-f", "lavfi",
-		"-i", fmt.Sprintf("color=c=black:s=%dx%d:r=%d", width, height, fps),
-		"-vf", "format=yuv420p",
-		"-pix_fmt", "yuv420p",
-		"-f", "v4l2",
-		fxOutputDeviceFromConfig(cfg),
-	}
-}
-
 func normalizeStreamOptions(cfg config.Config, opts StreamOptions) StreamOptions {
-	width, height, fps := fxGeometry(cfg.FX)
 	if opts.InputDevice == "" {
 		opts.InputDevice = fxInputDevice(cfg)
+	}
+	if opts.InputFormat == "" {
+		opts.InputFormat = cfg.Camera.InputFormat
 	}
 	if opts.OutputDevice == "" {
 		opts.OutputDevice = fxOutputDevice(cfg)
 	}
+	if opts.OutputFormat == "" {
+		opts.OutputFormat = cfg.Output.OutputFormat
+	}
 	if opts.Width <= 0 {
-		opts.Width = width
+		opts.Width = cfg.Camera.Width
 	}
 	if opts.Height <= 0 {
-		opts.Height = height
+		opts.Height = cfg.Camera.Height
 	}
 	if opts.FPS <= 0 {
-		opts.FPS = fps
+		opts.FPS = cfg.Camera.FPS
 	}
 	if opts.BackgroundMode == "" {
-		opts.BackgroundMode = cfg.FX.BackgroundMode
+		opts.BackgroundMode = cfg.FX.Mode
 	}
 	if opts.BackgroundImage == "" {
 		opts.BackgroundImage = cfg.FX.BackgroundImage
@@ -361,8 +282,14 @@ func validateStreamOptions(opts StreamOptions) error {
 	if opts.InputDevice == "" {
 		return errors.New("--input is required")
 	}
+	if err := config.ValidateCameraFormat(opts.InputFormat); err != nil {
+		return err
+	}
 	if opts.OutputDevice == "" {
 		return errors.New("--output is required")
+	}
+	if err := config.ValidateOutputFormat(opts.OutputFormat); err != nil {
+		return err
 	}
 	if opts.Width < 512 || opts.Height < 288 {
 		return fmt.Errorf("fx stream size must be at least 512x288, got %dx%d", opts.Width, opts.Height)
@@ -374,7 +301,7 @@ func validateStreamOptions(opts StreamOptions) error {
 		return err
 	}
 	if opts.BackgroundMode == "replace" && opts.BackgroundImage == "" {
-		return errors.New("fx background_mode replace requires fx.background_image or --background-image; live V4L2 output cannot be transparent")
+		return errors.New("fx mode replace requires fx.background_image or --background-image; live V4L2 output cannot be transparent")
 	}
 	if err := config.ValidateChromaColor(opts.ChromaColor); err != nil {
 		return err
@@ -388,21 +315,31 @@ func validateStreamOptions(opts StreamOptions) error {
 	return nil
 }
 
-func (s *Supervisor) startIdle(ctx context.Context) error {
-	group, err := startProcessGroup(ctx, "fx-idle", nil, s.logf, []commandSpec{{Name: "ffmpeg", Args: FXIdleFFmpegArgs(s.cfg.FX)}})
-	if err != nil {
-		return err
-	}
-	s.setCurrent(group, StateIdle, "fx idle stream is writing to "+fxOutputDevice(s.cfg))
-	return nil
-}
-
 func (s *Supervisor) startFX(ctx context.Context) error {
 	group, err := startFXPipeline(ctx, s.cfg, StreamOptions{}, s.logf)
 	if err != nil {
 		return err
 	}
 	s.setCurrent(group, StateActive, "Maxine FX is writing to "+fxOutputDevice(s.cfg))
+	return nil
+}
+
+func (s *Supervisor) startIdle(ctx context.Context) error {
+	opts := normalizeStreamOptions(s.cfg, StreamOptions{})
+	if err := validateStreamOptions(opts); err != nil {
+		return err
+	}
+	env, result := maxineEnv(s.cfg)
+	if result.HelperPath == "" {
+		return errors.New("Maxine helper binary not found; run make build")
+	}
+	group, err := startProcessGroup(ctx, "fx-idle", nil, s.logf, []commandSpec{
+		{Name: result.HelperPath, Args: IdleOutputHelperArgs(result, opts), Env: env},
+	})
+	if err != nil {
+		return err
+	}
+	s.setCurrent(group, StateIdle, "idle stream is writing to "+fxOutputDevice(s.cfg))
 	return nil
 }
 
@@ -432,22 +369,7 @@ func startFXPipeline(ctx context.Context, cfg config.Config, opts StreamOptions,
 	}
 
 	specs := []commandSpec{
-		{Name: "ffmpeg", Args: FXInputFFmpegArgs(opts)},
-		{Name: result.HelperPath, Args: []string{
-			"stream",
-			"--sdk-path", result.SDKPath,
-			"--model-dir", result.ModelDir,
-			"--width", strconv.Itoa(opts.Width),
-			"--height", strconv.Itoa(opts.Height),
-			"--fps", strconv.Itoa(opts.FPS),
-			"--background", opts.BackgroundMode,
-			"--replacement", replacementPath,
-			"--chroma-color", opts.ChromaColor,
-			"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
-			"--denoise", boolArg(opts.DenoiseEnabled),
-			"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
-		}, Env: env},
-		{Name: "ffmpeg", Args: FXOutputFFmpegArgs(opts)},
+		{Name: result.HelperPath, Args: NativeStreamHelperArgs(result, opts, replacementPath), Env: env},
 	}
 	group, err := startProcessGroupWithCleanup(ctx, "fx", nil, logf, cleanup, specs)
 	if err != nil {
@@ -457,6 +379,39 @@ func startFXPipeline(ctx context.Context, cfg config.Config, opts StreamOptions,
 		return nil, err
 	}
 	return group, nil
+}
+
+func NativeStreamHelperArgs(result DoctorResult, opts StreamOptions, replacementPath string) []string {
+	return []string{
+		"native-stream",
+		"--sdk-path", result.SDKPath,
+		"--model-dir", result.ModelDir,
+		"--input-device", opts.InputDevice,
+		"--input-format", opts.InputFormat,
+		"--output-device", opts.OutputDevice,
+		"--output-format", opts.OutputFormat,
+		"--width", strconv.Itoa(opts.Width),
+		"--height", strconv.Itoa(opts.Height),
+		"--fps", strconv.Itoa(opts.FPS),
+		"--background", opts.BackgroundMode,
+		"--replacement", replacementPath,
+		"--chroma-color", opts.ChromaColor,
+		"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
+		"--denoise", boolArg(opts.DenoiseEnabled),
+		"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
+	}
+}
+
+func IdleOutputHelperArgs(result DoctorResult, opts StreamOptions) []string {
+	return []string{
+		"idle-output",
+		"--output-device", opts.OutputDevice,
+		"--output-format", opts.OutputFormat,
+		"--width", strconv.Itoa(opts.Width),
+		"--height", strconv.Itoa(opts.Height),
+		"--fps", strconv.Itoa(opts.FPS),
+		"--idle-label", "NV-vCam idling ...",
+	}
 }
 
 func prepareReplacementPPM(opts StreamOptions) (string, func(), error) {
@@ -522,19 +477,6 @@ func (s *Supervisor) ownedPIDs() map[int]bool {
 	out := make(map[int]bool, len(s.owned))
 	for pid, ok := range s.owned {
 		out[pid] = ok
-	}
-	return out
-}
-
-func (s *Supervisor) inputOwnedPIDs() map[int]bool {
-	out := s.ownedPIDs()
-	if s.inputIgnorePIDs == nil {
-		return out
-	}
-	for pid, ok := range s.inputIgnorePIDs() {
-		if ok {
-			out[pid] = true
-		}
 	}
 	return out
 }
@@ -739,34 +681,10 @@ func processPID(cmd *exec.Cmd) int {
 	return cmd.Process.Pid
 }
 
-func fxGeometry(cfg config.FXConfig) (int, int, int) {
-	width, height, fps := cfg.Width, cfg.Height, cfg.FPS
-	if width <= 0 {
-		width = 2560
-	}
-	if height <= 0 {
-		height = 1440
-	}
-	if fps <= 0 {
-		fps = 25
-	}
-	return width, height, fps
-}
-
 func fxInputDevice(cfg config.Config) string {
-	if cfg.FX.InputDevice != "" {
-		return cfg.FX.InputDevice
-	}
-	return cfg.Input.Device
+	return cfg.Camera.InputDevice
 }
 
 func fxOutputDevice(cfg config.Config) string {
-	return fxOutputDeviceFromConfig(cfg.FX)
-}
-
-func fxOutputDeviceFromConfig(cfg config.FXConfig) string {
-	if cfg.OutputDevice != "" {
-		return cfg.OutputDevice
-	}
-	return "/dev/video20"
+	return cfg.Output.Device
 }

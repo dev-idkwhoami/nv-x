@@ -11,24 +11,27 @@ import (
 )
 
 type Config struct {
-	Input    InputConfig
+	Camera   CameraConfig
 	Output   OutputConfig
 	Loopback LoopbackConfig
-	Capture  CaptureConfig
 	FX       FXConfig
 	Service  ServiceConfig
 	UI       UIConfig
 }
 
-type InputConfig struct {
-	Device string
-	Label  string
+type CameraConfig struct {
+	InputDevice string
+	InputFormat string
+	Width       int
+	Height      int
+	FPS         int
 }
 
 type OutputConfig struct {
-	Device  string
-	VideoNR int
-	Label   string
+	Device       string
+	VideoNR      int
+	Label        string
+	OutputFormat string
 }
 
 type LoopbackConfig struct {
@@ -37,27 +40,9 @@ type LoopbackConfig struct {
 	MaxBuffers    int
 }
 
-type CaptureConfig struct {
-	Enabled            bool
-	InputCommand       string
-	Device             string
-	FPS                int
-	Width              int
-	Height             int
-	UseCUDAScale       bool
-	IdleTimeoutSeconds int
-	IdleLabel          string
-}
-
 type FXConfig struct {
 	Enabled             bool
-	IdleEnabled         bool
-	InputDevice         string
-	OutputDevice        string
-	Width               int
-	Height              int
-	FPS                 int
-	BackgroundMode      string
+	Mode                string
 	BackgroundImage     string
 	ChromaColor         string
 	SDKPath             string
@@ -79,40 +64,27 @@ type UIConfig struct {
 
 func Default() Config {
 	return Config{
-		Input: InputConfig{
-			Device: "/dev/video10",
-			Label:  "Sony Camera RAW",
+		Camera: CameraConfig{
+			InputDevice: "/dev/video0",
+			InputFormat: "nv12",
+			Width:       1920,
+			Height:      1080,
+			FPS:         50,
 		},
 		Output: OutputConfig{
-			Device:  "/dev/video20",
-			VideoNR: 20,
-			Label:   "Sony Camera FX",
+			Device:       "/dev/video10",
+			VideoNR:      10,
+			Label:        "NV-vCam",
+			OutputFormat: "yuv420p",
 		},
 		Loopback: LoopbackConfig{
 			ConfigPath:    "/etc/modprobe.d/nv-vcam-v4l2loopback.conf",
 			ExclusiveCaps: true,
-			MaxBuffers:    4,
-		},
-		Capture: CaptureConfig{
-			Enabled:            true,
-			InputCommand:       "gphoto2 --stdout --capture-movie",
-			Device:             "/dev/video10",
-			FPS:                25,
-			Width:              2560,
-			Height:             1440,
-			UseCUDAScale:       true,
-			IdleTimeoutSeconds: 15,
-			IdleLabel:          "nv-vcam idling ...",
+			MaxBuffers:    8,
 		},
 		FX: FXConfig{
 			Enabled:             true,
-			IdleEnabled:         true,
-			InputDevice:         "/dev/video10",
-			OutputDevice:        "/dev/video20",
-			Width:               2560,
-			Height:              1440,
-			FPS:                 25,
-			BackgroundMode:      "blur",
+			Mode:                "blur",
 			BackgroundImage:     "",
 			ChromaColor:         "#00ff00",
 			SDKPath:             "/usr/local/VideoFX",
@@ -171,36 +143,24 @@ func Load(path string) (Config, error) {
 
 func Render(c Config) string {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "[input]\n")
-	fmt.Fprintf(&b, "device = %q\n", c.Input.Device)
-	fmt.Fprintf(&b, "label = %q\n\n", c.Input.Label)
+	fmt.Fprintf(&b, "[camera]\n")
+	fmt.Fprintf(&b, "input_device = %q\n", c.Camera.InputDevice)
+	fmt.Fprintf(&b, "input_format = %q\n", c.Camera.InputFormat)
+	fmt.Fprintf(&b, "width = %d\n", c.Camera.Width)
+	fmt.Fprintf(&b, "height = %d\n", c.Camera.Height)
+	fmt.Fprintf(&b, "fps = %d\n\n", c.Camera.FPS)
 	fmt.Fprintf(&b, "[output]\n")
 	fmt.Fprintf(&b, "device = %q\n", c.Output.Device)
 	fmt.Fprintf(&b, "video_nr = %d\n", c.Output.VideoNR)
-	fmt.Fprintf(&b, "label = %q\n\n", c.Output.Label)
+	fmt.Fprintf(&b, "label = %q\n", c.Output.Label)
+	fmt.Fprintf(&b, "output_format = %q\n\n", c.Output.OutputFormat)
 	fmt.Fprintf(&b, "[loopback]\n")
 	fmt.Fprintf(&b, "config_path = %q\n", c.Loopback.ConfigPath)
 	fmt.Fprintf(&b, "exclusive_caps = %t\n", c.Loopback.ExclusiveCaps)
 	fmt.Fprintf(&b, "max_buffers = %d\n\n", c.Loopback.MaxBuffers)
-	fmt.Fprintf(&b, "[capture]\n")
-	fmt.Fprintf(&b, "enabled = %t\n", c.Capture.Enabled)
-	fmt.Fprintf(&b, "input_command = %q\n", c.Capture.InputCommand)
-	fmt.Fprintf(&b, "device = %q\n", c.Capture.Device)
-	fmt.Fprintf(&b, "fps = %d\n", c.Capture.FPS)
-	fmt.Fprintf(&b, "width = %d\n", c.Capture.Width)
-	fmt.Fprintf(&b, "height = %d\n", c.Capture.Height)
-	fmt.Fprintf(&b, "use_cuda_scale = %t\n", c.Capture.UseCUDAScale)
-	fmt.Fprintf(&b, "idle_timeout_seconds = %d\n", c.Capture.IdleTimeoutSeconds)
-	fmt.Fprintf(&b, "idle_label = %q\n\n", c.Capture.IdleLabel)
 	fmt.Fprintf(&b, "[fx]\n")
 	fmt.Fprintf(&b, "enabled = %t\n", c.FX.Enabled)
-	fmt.Fprintf(&b, "idle_enabled = %t\n", c.FX.IdleEnabled)
-	fmt.Fprintf(&b, "input_device = %q\n", c.FX.InputDevice)
-	fmt.Fprintf(&b, "output_device = %q\n", c.FX.OutputDevice)
-	fmt.Fprintf(&b, "width = %d\n", c.FX.Width)
-	fmt.Fprintf(&b, "height = %d\n", c.FX.Height)
-	fmt.Fprintf(&b, "fps = %d\n", c.FX.FPS)
-	fmt.Fprintf(&b, "background_mode = %q\n", c.FX.BackgroundMode)
+	fmt.Fprintf(&b, "mode = %q\n", c.FX.Mode)
 	fmt.Fprintf(&b, "background_image = %q\n", c.FX.BackgroundImage)
 	fmt.Fprintf(&b, "chroma_color = %q\n", c.FX.ChromaColor)
 	fmt.Fprintf(&b, "sdk_path = %q\n", c.FX.SDKPath)
@@ -250,13 +210,31 @@ func Parse(data []byte) (Config, error) {
 
 func assign(cfg *Config, section, key, raw string) error {
 	switch section + "." + key {
-	case "input.device":
+	case "camera.input_device":
 		v, err := parseString(raw)
-		cfg.Input.Device = v
+		cfg.Camera.InputDevice = v
 		return err
-	case "input.label":
+	case "camera.input_format":
 		v, err := parseString(raw)
-		cfg.Input.Label = v
+		if err != nil {
+			return err
+		}
+		if err := ValidateCameraFormat(v); err != nil {
+			return err
+		}
+		cfg.Camera.InputFormat = v
+		return nil
+	case "camera.width":
+		v, err := strconv.Atoi(raw)
+		cfg.Camera.Width = v
+		return err
+	case "camera.height":
+		v, err := strconv.Atoi(raw)
+		cfg.Camera.Height = v
+		return err
+	case "camera.fps":
+		v, err := strconv.Atoi(raw)
+		cfg.Camera.FPS = v
 		return err
 	case "output.device":
 		v, err := parseString(raw)
@@ -270,6 +248,16 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := parseString(raw)
 		cfg.Output.Label = v
 		return err
+	case "output.output_format":
+		v, err := parseString(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateOutputFormat(v); err != nil {
+			return err
+		}
+		cfg.Output.OutputFormat = v
+		return nil
 	case "loopback.config_path":
 		v, err := parseString(raw)
 		cfg.Loopback.ConfigPath = v
@@ -282,71 +270,11 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := strconv.Atoi(raw)
 		cfg.Loopback.MaxBuffers = v
 		return err
-	case "capture.enabled":
-		v, err := strconv.ParseBool(raw)
-		cfg.Capture.Enabled = v
-		return err
-	case "capture.input_command":
-		v, err := parseString(raw)
-		cfg.Capture.InputCommand = v
-		return err
-	case "capture.device":
-		v, err := parseString(raw)
-		cfg.Capture.Device = v
-		return err
-	case "capture.fps":
-		v, err := strconv.Atoi(raw)
-		cfg.Capture.FPS = v
-		return err
-	case "capture.width":
-		v, err := strconv.Atoi(raw)
-		cfg.Capture.Width = v
-		return err
-	case "capture.height":
-		v, err := strconv.Atoi(raw)
-		cfg.Capture.Height = v
-		return err
-	case "capture.use_cuda_scale":
-		v, err := strconv.ParseBool(raw)
-		cfg.Capture.UseCUDAScale = v
-		return err
-	case "capture.idle_timeout_seconds":
-		v, err := strconv.Atoi(raw)
-		cfg.Capture.IdleTimeoutSeconds = v
-		return err
-	case "capture.idle_label":
-		v, err := parseString(raw)
-		cfg.Capture.IdleLabel = v
-		return err
 	case "fx.enabled":
 		v, err := strconv.ParseBool(raw)
 		cfg.FX.Enabled = v
 		return err
-	case "fx.idle_enabled":
-		v, err := strconv.ParseBool(raw)
-		cfg.FX.IdleEnabled = v
-		return err
-	case "fx.input_device":
-		v, err := parseString(raw)
-		cfg.FX.InputDevice = v
-		return err
-	case "fx.output_device":
-		v, err := parseString(raw)
-		cfg.FX.OutputDevice = v
-		return err
-	case "fx.width":
-		v, err := strconv.Atoi(raw)
-		cfg.FX.Width = v
-		return err
-	case "fx.height":
-		v, err := strconv.Atoi(raw)
-		cfg.FX.Height = v
-		return err
-	case "fx.fps":
-		v, err := strconv.Atoi(raw)
-		cfg.FX.FPS = v
-		return err
-	case "fx.background_mode":
+	case "fx.mode":
 		v, err := parseString(raw)
 		if err != nil {
 			return err
@@ -354,7 +282,7 @@ func assign(cfg *Config, section, key, raw string) error {
 		if err := ValidateBackgroundMode(v); err != nil {
 			return err
 		}
-		cfg.FX.BackgroundMode = v
+		cfg.FX.Mode = v
 		return nil
 	case "fx.background_image":
 		v, err := parseString(raw)
@@ -400,9 +328,6 @@ func assign(cfg *Config, section, key, raw string) error {
 		}
 		cfg.FX.DenoiseStrength = v
 		return nil
-	case "fx.onnxruntime_library_path", "fx.model_path", "fx.provider", "fx.device_id":
-		// Deprecated pre-Maxine keys are accepted so older config files keep loading.
-		return nil
 	case "service.name":
 		v, err := parseString(raw)
 		cfg.Service.Name = v
@@ -426,12 +351,30 @@ func assign(cfg *Config, section, key, raw string) error {
 	}
 }
 
+func ValidateCameraFormat(format string) error {
+	switch strings.ToLower(format) {
+	case "nv12", "yuv420p", "yu12":
+		return nil
+	default:
+		return fmt.Errorf("invalid camera input_format %q: expected nv12 or yuv420p", format)
+	}
+}
+
+func ValidateOutputFormat(format string) error {
+	switch strings.ToLower(format) {
+	case "yuv420p", "yu12":
+		return nil
+	default:
+		return fmt.Errorf("invalid output output_format %q: expected yuv420p", format)
+	}
+}
+
 func ValidateBackgroundMode(mode string) error {
 	switch mode {
 	case "blur", "mask", "replace", "chroma":
 		return nil
 	default:
-		return fmt.Errorf("invalid fx background_mode %q: expected blur, mask, replace, or chroma", mode)
+		return fmt.Errorf("invalid fx mode %q: expected blur, mask, replace, or chroma", mode)
 	}
 }
 

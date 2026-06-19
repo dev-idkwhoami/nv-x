@@ -30,7 +30,7 @@ func UserServicePath(name string) (string, error) {
 
 func RenderUnit() string {
 	return `[Unit]
-Description=nv-vcam RAW virtual camera service
+Description=nv-vcam native virtual camera service
 After=default.target
 
 [Service]

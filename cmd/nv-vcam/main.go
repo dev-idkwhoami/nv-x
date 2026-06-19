@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
 	"nv-vcam/internal/fx"
@@ -73,7 +72,7 @@ func usage() {
   nv-vcam service start|stop|restart|status [--dry-run]
   nv-vcam fx doctor
   nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--denoise-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
-  nv-vcam fx stream [--input /dev/video10] [--output /dev/video20] [--width 2560] [--height 1440] [--fps 25] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
+  nv-vcam fx stream [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
   nv-vcam run`)
 }
 
@@ -401,24 +400,13 @@ func status(ctx context.Context) error {
 	} else {
 		fmt.Printf("systemd user service active: %t\n", active)
 	}
-	fmt.Printf("expected input %s exists: %t\n", cfg.Input.Device, devices.DeviceExists(cfg.Input.Device))
+	fmt.Printf("expected input %s exists: %t\n", cfg.Camera.InputDevice, devices.DeviceExists(cfg.Camera.InputDevice))
 	fmt.Printf("expected output %s exists: %t\n", cfg.Output.Device, devices.DeviceExists(cfg.Output.Device))
-	fmt.Printf("capture device: %s\n", cfg.Capture.Device)
-	if missing := capture.MissingDependencies(cfg); len(missing) > 0 {
-		fmt.Printf("capture dependencies: missing %s\n", strings.Join(missing, ", "))
-	} else {
-		fmt.Println("capture dependencies: ok")
-	}
-	if statePath, err := capture.DefaultStatePath(); err == nil {
-		if snap, ok := capture.ReadState(statePath); ok {
-			fmt.Printf("capture state: %s (%s), consumers=%d, updated=%s\n", snap.State, snap.Message, snap.Consumers, snap.UpdatedAt)
-		} else {
-			fmt.Printf("capture state: unavailable (%s missing or unreadable)\n", statePath)
-		}
-	}
+	fmt.Printf("camera format: %s %dx%d @ %dfps\n", cfg.Camera.InputFormat, cfg.Camera.Width, cfg.Camera.Height, cfg.Camera.FPS)
+	fmt.Printf("output format: %s\n", cfg.Output.OutputFormat)
 	fmt.Printf("fx enabled: %t\n", cfg.FX.Enabled)
-	fmt.Printf("fx input: %s\n", cfg.FX.InputDevice)
-	fmt.Printf("fx output: %s\n", cfg.FX.OutputDevice)
+	fmt.Printf("fx input: %s\n", cfg.Camera.InputDevice)
+	fmt.Printf("fx output: %s\n", cfg.Output.Device)
 	if missing := fx.MissingDependencies(cfg); len(missing) > 0 {
 		fmt.Printf("fx dependencies: missing %s\n", strings.Join(missing, ", "))
 	} else {
