@@ -173,6 +173,7 @@ export namespace config {
 
 
 
+
 }
 
 export namespace devices {
@@ -416,6 +417,34 @@ export namespace main {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.theme = source["theme"];
+	    }
+	}
+	export class UserSettings {
+	    mode: string;
+	    lightEnabled: boolean;
+	    lightAddress: string;
+	    lightBrightness: number;
+	    lightTemperature: number;
+	    blurStrength: number;
+	    chromaColor: string;
+	    backgroundImage: string;
+	    theme: string;
+
+	    static createFrom(source: any = {}) {
+	        return new UserSettings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.lightEnabled = source["lightEnabled"];
+	        this.lightAddress = source["lightAddress"];
+	        this.lightBrightness = source["lightBrightness"];
+	        this.lightTemperature = source["lightTemperature"];
+	        this.blurStrength = source["blurStrength"];
+	        this.chromaColor = source["chromaColor"];
+	        this.backgroundImage = source["backgroundImage"];
 	        this.theme = source["theme"];
 	    }
 	}

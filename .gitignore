@@ -3,6 +3,10 @@
 /nv-vcam
 /app/build/bin/
 /app/frontend/dist/
+/packaging/arch/*.pkg.tar.*
+/packaging/arch/*.src.tar.*
+/packaging/arch/pkg/
+/packaging/arch/src/
 
 # Dependencies and package-manager caches
 /app/frontend/node_modules/

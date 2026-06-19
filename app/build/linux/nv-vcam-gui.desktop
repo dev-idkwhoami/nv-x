@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=NV-vCam
+Comment=NV-vCam camera effects controller
+Exec=nv-vcam-gui
+TryExec=nv-vcam-gui
+Icon=nv-vcam-gui
+Terminal=false
+Categories=AudioVideo;Video;
+StartupWMClass=nv-vcam-gui

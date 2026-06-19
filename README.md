@@ -35,6 +35,7 @@ Runtime:
 - Linux with systemd user services.
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - Cam Link or another V4L2 input that can provide `NV12 1920x1080 @ 50fps`.
+- NVIDIA GPU/driver stack compatible with NVIDIA Maxine.
 - NVIDIA NGC CLI installed and authenticated with `ngc config set` for SDK Core download.
 - NVIDIA NGC API key exported as `NGC_CLI_API_KEY` for Maxine feature installation.
 - NVIDIA Maxine Video Effects SDK Core installed under `/usr/local/VideoFX`.
@@ -44,6 +45,7 @@ Runtime:
 - Maxine TensorRT model packages under `/usr/local/VideoFX/lib/models`.
 - `pkexec`/polkit for GUI loopback write/reload elevation.
 - `fuser` from `psmisc` is optional but useful for troubleshooting busy devices.
+- Wails GUI runtime dependencies: GTK 3 and WebKitGTK 4.1.
 
 Build:
 
@@ -51,16 +53,20 @@ Build:
 - Wails v2 CLI.
 - Bun.
 - WebKitGTK/GTK development packages required by Wails. On this system the Wails build uses the `webkit2_41` tag, configured in `app/wails.json`.
+- C/C++ build tools for the native Maxine helper.
+- `makepkg`/`pacman` for the CachyOS/Arch package install flow.
 
 Arch/CachyOS package names are typically:
 
 ```bash
-sudo pacman -S --needed go bun v4l2loopback-dkms psmisc polkit gcc
+sudo pacman -S --needed go gcc make wails webkit2gtk-4.1 gtk3 v4l2loopback-dkms psmisc polkit
 ```
 
 Install the kernel headers that match `uname -r`; on CachyOS this may be a CachyOS-specific headers package rather than plain `linux-headers`.
 
-Install the Wails v2 CLI with Go:
+`bun` may be installed either through pacman or your existing user install. The local package target runs `makepkg --nodeps`, so it can use `bun` from your current `PATH` instead of requiring the pacman `bun` package. For a strict redistributable PKGBUILD, install `bun` through pacman and remove `--nodeps`.
+
+If `wails` is not available from pacman on the target machine, install the Wails v2 CLI with Go:
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -77,13 +83,42 @@ export NGC_CLI_API_KEY=<your-ngc-api-key>
 
 ## Build And Install
 
+Recommended CachyOS/Arch desktop install:
+
 ```bash
 make check
-make build
+make desktop
+```
+
+`make desktop` builds a local Arch package from `packaging/arch/PKGBUILD`, removes stale user-local GUI files that can shadow the package, installs the newest `nv-vcam-*.pkg.tar.zst` with `sudo pacman -U`, and refreshes desktop caches when the cache tools are available.
+
+The package installs:
+
+```text
+/usr/bin/nv-vcam
+/usr/bin/nv-vcam-gui
+/usr/bin/nv-vcam-maxine-helper
+/usr/lib/nv-vcam/nv-vcam-os-release-shim.so
+/usr/share/applications/nv-vcam-gui.desktop
+/usr/share/icons/hicolor/256x256/apps/nv-vcam-gui.png
+```
+
+The GUI binary is intentionally named `nv-vcam-gui`; the CLI remains `nv-vcam`.
+
+Manual package steps, equivalent to the package part of `make desktop`:
+
+```bash
+make package
+sudo pacman -U packaging/arch/nv-vcam-*.pkg.tar.zst
+```
+
+Developer-local install is still available:
+
+```bash
 make install
 ```
 
-`make install` installs the CLI/service binary to `~/.local/bin/nv-vcam`, the Maxine helper to `~/.local/bin/nv-vcam-maxine-helper`, and the CachyOS/Arch compatibility shim to `~/.local/lib/nv-vcam/nv-vcam-os-release-shim.so`.
+`make install` installs into `~/.local/bin` and `~/.local/lib/nv-vcam`. It is useful for development, but the package path is preferred for a normal CachyOS/Arch desktop because Plasma/Gtk launchers resolve `/usr/bin` and `/usr/share/applications` more reliably than ad hoc user-local desktop entries.
 
 ```bash
 export NGC_CLI_API_KEY=<your-ngc-api-key>
@@ -243,4 +278,13 @@ The Wails app lives in `app/`. It uses Svelte 5, Tailwind CSS 4, and shadcn-svel
 make dev
 ```
 
-The GUI is for management/status. It intentionally does not preview camera feeds because Wails/WebKitGTK did not expose the loopback camera reliably on the target setup.
+`make dev` / `wails dev` starts the developer dashboard with detailed device, service, loopback, config, and FX diagnostics.
+
+Production builds use the slim user UI:
+
+```bash
+make build
+app/build/bin/nv-vcam-gui
+```
+
+The installed desktop app from `make desktop` is launched as `nv-vcam-gui`. The user UI provides direct background mode selection, inline mode settings, a Settings page for theme and Elgato light auto-control, and debounced automatic config save/service restart.

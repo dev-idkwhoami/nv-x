@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"nv-vcam/internal/config"
 	"nv-vcam/internal/devices"
 	"nv-vcam/internal/fx"
@@ -37,6 +39,18 @@ type ConfigView struct {
 	Found    bool          `json:"found"`
 	Rendered string        `json:"rendered"`
 	Config   config.Config `json:"config"`
+}
+
+type UserSettings struct {
+	Mode             string  `json:"mode"`
+	LightEnabled     bool    `json:"lightEnabled"`
+	LightAddress     string  `json:"lightAddress"`
+	LightBrightness  int     `json:"lightBrightness"`
+	LightTemperature int     `json:"lightTemperature"`
+	BlurStrength     float64 `json:"blurStrength"`
+	ChromaColor      string  `json:"chromaColor"`
+	BackgroundImage  string  `json:"backgroundImage"`
+	Theme            string  `json:"theme"`
 }
 
 type LoopbackView struct {
@@ -174,6 +188,55 @@ func (a *App) SetTheme(theme string) ActionResult {
 		return saveConfig(cfg)
 	})
 	return result("theme updated", out, err)
+}
+
+func (a *App) SaveUserSettings(settings UserSettings) ActionResult {
+	cfg := loadEffectiveConfig()
+	if err := config.ValidateBackgroundMode(settings.Mode); err != nil {
+		return result("", "", err)
+	}
+	if err := config.ValidateLightBrightness(settings.LightBrightness); err != nil {
+		return result("", "", err)
+	}
+	if err := config.ValidateLightTemperature(settings.LightTemperature); err != nil {
+		return result("", "", err)
+	}
+	if settings.BlurStrength < 0 || settings.BlurStrength > 1 {
+		return result("", "", fmt.Errorf("invalid blur strength %.2f: expected 0-1", settings.BlurStrength))
+	}
+	if err := config.ValidateChromaColor(settings.ChromaColor); err != nil {
+		return result("", "", err)
+	}
+	if err := config.ValidateTheme(settings.Theme); err != nil {
+		return result("", "", err)
+	}
+	cfg.FX.Mode = settings.Mode
+	cfg.FX.BlurStrength = settings.BlurStrength
+	cfg.FX.ChromaColor = settings.ChromaColor
+	cfg.FX.BackgroundImage = strings.TrimSpace(settings.BackgroundImage)
+	cfg.Light.Enabled = settings.LightEnabled
+	cfg.Light.Address = strings.TrimSpace(settings.LightAddress)
+	cfg.Light.Brightness = settings.LightBrightness
+	cfg.Light.Temperature = settings.LightTemperature
+	cfg.UI.Theme = settings.Theme
+	out, err := captureOutput(func() error {
+		return saveConfig(cfg)
+	})
+	return result("settings updated", out, err)
+}
+
+func (a *App) ChooseBackgroundImage() (string, error) {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{
+		Title: "Select background image",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Images", Pattern: "*.jpg;*.jpeg;*.png"},
+			{DisplayName: "All Files", Pattern: "*"},
+		},
+	})
 }
 
 func (a *App) ShowLoopback() LoopbackView {

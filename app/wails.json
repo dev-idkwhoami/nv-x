@@ -2,10 +2,10 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "nv-vcam",
   "build:tags": "webkit2_41",
-  "outputfilename": "nv-vcam",
+  "outputfilename": "nv-vcam-gui",
   "frontend:install": "bun install",
-  "frontend:build": "bun run build",
-  "frontend:dev:watcher": "bun run dev",
+  "frontend:build": "env VITE_NV_VCAM_APP_MODE=user bun run build",
+  "frontend:dev:watcher": "env VITE_NV_VCAM_APP_MODE=dev bun run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "Maximilian Oswald",

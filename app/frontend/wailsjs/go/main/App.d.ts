@@ -3,6 +3,8 @@
 import {main} from '../models';
 import {devices} from '../models';
 
+export function ChooseBackgroundImage():Promise<string>;
+
 export function GetConfig():Promise<main.ConfigView>;
 
 export function GetServiceStatus():Promise<main.ActionResult>;
@@ -18,6 +20,8 @@ export function ListDevices():Promise<Array<devices.Device>>;
 export function ReloadLoopback(arg1:boolean):Promise<main.ActionResult>;
 
 export function RestartService():Promise<main.ActionResult>;
+
+export function SaveUserSettings(arg1:main.UserSettings):Promise<main.ActionResult>;
 
 export function SetTheme(arg1:string):Promise<main.ActionResult>;
 
