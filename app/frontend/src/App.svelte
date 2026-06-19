@@ -182,8 +182,8 @@
     <section class="grid gap-4 md:grid-cols-4">
       {#each [
         ['v4l2loopback', boolText(status?.v4l2LoopbackLoaded), status?.v4l2LoopbackLoaded],
-        ['RAW input', status?.expectedInput ?? '/dev/video10', status?.expectedInputExists],
-        ['FX output', status?.fx?.state ?? 'unknown', status?.fx?.state === 'idle' || status?.fx?.state === 'active'],
+        ['Cam Link input', status?.expectedInput ?? '/dev/video0', status?.expectedInputExists],
+        ['NV-vCam output', status?.fx?.state ?? 'unknown', status?.fx?.state === 'idle' || status?.fx?.state === 'active'],
         ['Service', status?.service.name ?? 'nv-vcam.service', status?.service.active]
       ] as [title, value, ok]}
         <Card>
@@ -361,41 +361,20 @@
                 <Badge variant={statusTone(status?.service.exists)}>File: {boolText(status?.service.exists)}</Badge>
                 <Badge variant={statusTone(status?.service.active)}>Active: {boolText(status?.service.active)}</Badge>
                 <Badge variant={statusTone(status?.loopbackConfigExists)}>Loopback config: {boolText(status?.loopbackConfigExists)}</Badge>
-                <Badge variant={statusTone(status?.capture?.state === 'idle' || status?.capture?.state === 'active')}>RAW: {status?.capture?.state ?? 'unknown'}</Badge>
-                <Badge variant={statusTone(status?.fx?.state === 'idle' || status?.fx?.state === 'active')}>FX: {status?.fx?.state ?? 'unknown'}</Badge>
+                <Badge variant={statusTone(status?.expectedInputExists)}>Input: {status?.expectedInput ?? '/dev/video0'}</Badge>
+                <Badge variant={statusTone(status?.fx?.state === 'idle' || status?.fx?.state === 'active')}>Native FX: {status?.fx?.state ?? 'unknown'}</Badge>
               </div>
-              <div class="grid gap-3 xl:grid-cols-2">
+              <div class="grid gap-3">
                 <div class="rounded-lg border bg-muted/20 p-3 text-sm">
-                  <p class="mb-3 font-medium">RAW capture</p>
+                  <p class="mb-3 font-medium">Native Maxine stream</p>
                   <div class="grid gap-2 sm:grid-cols-2">
                     <div>
-                      <p class="text-muted-foreground">Device</p>
-                      <p class="font-mono">{status?.capture?.device ?? '/dev/video10'}</p>
+                      <p class="text-muted-foreground">Input</p>
+                      <p class="font-mono">{status?.expectedInput ?? '/dev/video0'}</p>
                     </div>
-                    <div>
-                      <p class="text-muted-foreground">External consumers</p>
-                      <p>{status?.capture?.consumers ?? 0}</p>
-                    </div>
-                    <div>
-                      <p class="text-muted-foreground">Dependencies</p>
-                      <p>{status?.capture?.dependencies?.length ? `Missing ${status.capture.dependencies.join(', ')}` : 'OK'}</p>
-                    </div>
-                    <div>
-                      <p class="text-muted-foreground">Updated</p>
-                      <p>{status?.capture?.updatedAt ?? 'not available'}</p>
-                    </div>
-                  </div>
-                  {#if status?.capture?.message}
-                    <Separator class="my-3" />
-                    <p class="text-muted-foreground">{status.capture.message}</p>
-                  {/if}
-                </div>
-                <div class="rounded-lg border bg-muted/20 p-3 text-sm">
-                  <p class="mb-3 font-medium">FX stream</p>
-                  <div class="grid gap-2 sm:grid-cols-2">
                     <div>
                       <p class="text-muted-foreground">Device</p>
-                      <p class="font-mono">{status?.fx?.device ?? '/dev/video20'}</p>
+                      <p class="font-mono">{status?.fx?.device ?? '/dev/video10'}</p>
                     </div>
                     <div>
                       <p class="text-muted-foreground">External consumers</p>

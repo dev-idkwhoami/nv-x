@@ -27,14 +27,9 @@ func Render(cfg config.Config) string {
 	if cfg.Loopback.ExclusiveCaps {
 		exclusive = "1"
 	}
-	// modprobe.d does not parse shell-style adjacent quoted array values the way
-	// the module parameter expects here. A single quoted comma-separated value
-	// gives v4l2loopback two labels without preserving quote characters.
-	labels := strings.Join([]string{cfg.Input.Label, cfg.Output.Label}, ",")
-	return fmt.Sprintf("# Managed by nv-vcam\noptions v4l2loopback devices=2 video_nr=10,%d card_label=%q exclusive_caps=%s,%s max_buffers=%d\n",
+	return fmt.Sprintf("# Managed by nv-vcam\noptions v4l2loopback devices=1 video_nr=%d card_label=%q exclusive_caps=%s max_buffers=%d\n",
 		cfg.Output.VideoNR,
-		labels,
-		exclusive,
+		cfg.Output.Label,
 		exclusive,
 		cfg.Loopback.MaxBuffers,
 	)
@@ -130,7 +125,7 @@ func Reload(ctx context.Context, cfg config.Config, dryRun bool) error {
 	}
 	if err := run(ctx, dryRun, "modprobe", "-r", "v4l2loopback"); err != nil {
 		if isBusy(err) {
-			return fmt.Errorf("%w\nv4l2loopback appears busy; try: fuser -v /dev/video10 /dev/video20", err)
+			return fmt.Errorf("%w\nv4l2loopback appears busy; try: fuser -v %s", err, cfg.Output.Device)
 		}
 		return err
 	}

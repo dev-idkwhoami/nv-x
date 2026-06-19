@@ -8,7 +8,7 @@ CC ?= gcc
 CXX ?= g++
 GO_PACKAGES := ./app ./cmd/nv-vcam ./internal/...
 
-MAXINE_RPATH := -Wl,-rpath,$(MAXINE_SDK)/lib -Wl,-rpath,$(MAXINE_SDK)/external/cuda/lib -Wl,-rpath,$(MAXINE_SDK)/external/tensorrt/lib -Wl,-rpath,$(MAXINE_SDK)/features/nvvfxgreenscreen/lib -Wl,-rpath,$(MAXINE_SDK)/features/nvvfxbackgroundblur/lib -Wl,-rpath,$(MAXINE_SDK)/features/nvvfxdenoising/lib
+MAXINE_RPATH := -Wl,-rpath,$(MAXINE_SDK)/lib -Wl,-rpath,$(MAXINE_SDK)/external/cuda/lib -Wl,-rpath,$(MAXINE_SDK)/external/tensorrt/lib -Wl,-rpath,$(MAXINE_SDK)/features/nvvfxgreenscreen/lib -Wl,-rpath,$(MAXINE_SDK)/features/nvvfxbackgroundblur/lib
 
 .PHONY: build dev install uninstall test check clean
 
@@ -23,7 +23,6 @@ bin/nv-vcam-maxine-helper: cmd/nv-vcam-maxine-helper/main.cpp
 		-I"$(MAXINE_SDK)/include" \
 		-I"$(MAXINE_SDK)/features/nvvfxgreenscreen/include" \
 		-I"$(MAXINE_SDK)/features/nvvfxbackgroundblur/include" \
-		-I"$(MAXINE_SDK)/features/nvvfxdenoising/include" \
 		-L"$(MAXINE_SDK)/lib" \
 		$(MAXINE_RPATH) \
 		-o $@ $< -lVideoFX -lNVCVImage
