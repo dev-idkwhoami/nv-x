@@ -46,6 +46,26 @@ export namespace config {
 	        this.ExecPath = source["ExecPath"];
 	    }
 	}
+	export class LightConfig {
+	    Enabled: boolean;
+	    Address: string;
+	    Brightness: number;
+	    Temperature: number;
+	    TimeoutMS: number;
+
+	    static createFrom(source: any = {}) {
+	        return new LightConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Enabled = source["Enabled"];
+	        this.Address = source["Address"];
+	        this.Brightness = source["Brightness"];
+	        this.Temperature = source["Temperature"];
+	        this.TimeoutMS = source["TimeoutMS"];
+	    }
+	}
 	export class FXConfig {
 	    Enabled: boolean;
 	    Mode: string;
@@ -111,6 +131,7 @@ export namespace config {
 	    Output: OutputConfig;
 	    Loopback: LoopbackConfig;
 	    FX: FXConfig;
+	    Light: LightConfig;
 	    Service: ServiceConfig;
 	    UI: UIConfig;
 
@@ -124,6 +145,7 @@ export namespace config {
 	        this.Output = this.convertValues(source["Output"], OutputConfig);
 	        this.Loopback = this.convertValues(source["Loopback"], LoopbackConfig);
 	        this.FX = this.convertValues(source["FX"], FXConfig);
+	        this.Light = this.convertValues(source["Light"], LightConfig);
 	        this.Service = this.convertValues(source["Service"], ServiceConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
 	    }

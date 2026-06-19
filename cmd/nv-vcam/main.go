@@ -461,6 +461,12 @@ func status(ctx context.Context) error {
 	fmt.Printf("fx enabled: %t\n", cfg.FX.Enabled)
 	fmt.Printf("fx input: %s\n", cfg.Camera.InputDevice)
 	fmt.Printf("fx output: %s\n", cfg.Output.Device)
+	fmt.Printf("light auto-control: %t\n", cfg.Light.Enabled)
+	if cfg.Light.Address != "" {
+		fmt.Printf("light address: %s\n", cfg.Light.Address)
+	} else {
+		fmt.Println("light address: auto from elgato-light-toggle config")
+	}
 	if missing := fx.MissingDependencies(cfg); len(missing) > 0 {
 		fmt.Printf("fx dependencies: missing %s\n", strings.Join(missing, ", "))
 	} else {

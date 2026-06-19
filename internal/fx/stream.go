@@ -18,6 +18,7 @@ import (
 
 	"nv-vcam/internal/capture"
 	"nv-vcam/internal/config"
+	"nv-vcam/internal/light"
 )
 
 type State string
@@ -63,6 +64,7 @@ type Supervisor struct {
 	owned    map[int]bool
 	current  *processGroup
 	consumer int
+	light    *light.Controller
 }
 
 func NewSupervisor(cfg config.Config, logf func(string, ...any)) *Supervisor {
@@ -75,6 +77,7 @@ func NewSupervisor(cfg config.Config, logf func(string, ...any)) *Supervisor {
 		logf:     logf,
 		state:    StateDisabled,
 		owned:    map[int]bool{},
+		light:    light.NewController(cfg.Light, logf),
 	}
 }
 
@@ -111,7 +114,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	defer s.stopCurrent(2 * time.Second)
+	defer func() {
+		s.setLight(ctx, false)
+		s.stopCurrent(2 * time.Second)
+	}()
 
 	var noConsumerSince time.Time
 	for {
@@ -138,6 +144,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 					if err := s.startFX(ctx); err != nil {
 						s.setState(StateError, err.Error())
 						s.logf("fx start failed: %v", err)
+						s.setLight(ctx, false)
+					} else {
+						s.setLight(ctx, true)
 					}
 					noConsumerSince = time.Time{}
 				}
@@ -150,6 +159,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 						if err := s.startFX(ctx); err != nil {
 							s.setState(StateError, err.Error())
 							s.logf("fx restart failed: %v", err)
+							s.setLight(ctx, false)
+						} else {
+							s.setLight(ctx, true)
 						}
 					}
 					continue
@@ -162,6 +174,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 				if time.Since(noConsumerSince) >= timeout {
 					s.logf("no FX consumers for %s; stopping native stream", timeout)
 					s.stopCurrent(2 * time.Second)
+					s.setLight(ctx, false)
 					if err := s.startIdle(ctx); err != nil {
 						s.setState(StateError, err.Error())
 						s.logf("fx idle restart failed: %v", err)
@@ -171,6 +184,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			case StateError:
 				if consumers == 0 {
 					s.stopCurrent(time.Second)
+					s.setLight(ctx, false)
 					if err := s.startIdle(ctx); err != nil {
 						s.setState(StateError, err.Error())
 					}
@@ -178,6 +192,13 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (s *Supervisor) setLight(ctx context.Context, on bool) {
+	if s.light == nil || !s.light.Enabled() {
+		return
+	}
+	go s.light.SetDesired(context.WithoutCancel(ctx), on)
 }
 
 func MissingDependencies(cfg config.Config) []string {

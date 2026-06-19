@@ -25,6 +25,7 @@ Default mode is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU
 - Wails desktop app under `app/`.
 - One `v4l2loopback` output camera: `/dev/video10 "NV-vCam"`.
 - On-demand native Maxine background blur, mask output, chroma background, or image replacement.
+- Optional Elgato ring light auto-control when the virtual camera has consumers.
 - Maxine still-image validation commands.
 
 ## Dependencies
@@ -136,6 +137,13 @@ sdk_path = "/usr/local/VideoFX"
 model_dir = "/usr/local/VideoFX/lib/models"
 enable_os_release_shim = true
 blur_strength = 0.75
+
+[light]
+enabled = false
+address = ""
+brightness = 20
+temperature = 206
+timeout_ms = 1500
 ```
 
 `nv-vcam loopback write` renders:
@@ -179,6 +187,14 @@ This sends NV12 through `NvCVImage_Transfer()` into a GPU BGR buffer and back to
 The normal service path runs the same native helper on demand. `nv-vcam run` watches `/dev/video10`; when an external app opens the virtual camera, it starts `nv-vcam-maxine-helper native-stream`. When no consumer remains, it stops the helper.
 
 On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-vcam` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.
+
+## Light Auto-Control
+
+`[light].enabled = true` lets the service turn an Elgato light on when an external app starts consuming `/dev/video10`, and turn it off when the stream returns to idle.
+
+If `[light].address` is empty, `nv-vcam` tries to reuse the active IP from `~/.config/elgato-light-toggle/config.json`. If no light is configured or reachable, camera setup and streaming continue; the service logs the skipped light update and does not fail the stream.
+
+`brightness` is `0-100`. `temperature` uses Elgato's API range, currently validated as `143-344`.
 
 ## Planned Features
 

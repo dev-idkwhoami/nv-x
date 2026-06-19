@@ -15,6 +15,7 @@ type Config struct {
 	Output   OutputConfig
 	Loopback LoopbackConfig
 	FX       FXConfig
+	Light    LightConfig
 	Service  ServiceConfig
 	UI       UIConfig
 }
@@ -49,6 +50,14 @@ type FXConfig struct {
 	ModelDir            string
 	EnableOSReleaseShim bool
 	BlurStrength        float64
+}
+
+type LightConfig struct {
+	Enabled     bool
+	Address     string
+	Brightness  int
+	Temperature int
+	TimeoutMS   int
 }
 
 type ServiceConfig struct {
@@ -89,6 +98,13 @@ func Default() Config {
 			ModelDir:            "/usr/local/VideoFX/lib/models",
 			EnableOSReleaseShim: true,
 			BlurStrength:        0.75,
+		},
+		Light: LightConfig{
+			Enabled:     false,
+			Address:     "",
+			Brightness:  20,
+			Temperature: 206,
+			TimeoutMS:   1500,
 		},
 		Service: ServiceConfig{
 			Name:     "nv-vcam.service",
@@ -163,6 +179,12 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
 	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
 	fmt.Fprintf(&b, "blur_strength = %.2f\n\n", c.FX.BlurStrength)
+	fmt.Fprintf(&b, "[light]\n")
+	fmt.Fprintf(&b, "enabled = %t\n", c.Light.Enabled)
+	fmt.Fprintf(&b, "address = %q\n", c.Light.Address)
+	fmt.Fprintf(&b, "brightness = %d\n", c.Light.Brightness)
+	fmt.Fprintf(&b, "temperature = %d\n", c.Light.Temperature)
+	fmt.Fprintf(&b, "timeout_ms = %d\n\n", c.Light.TimeoutMS)
 	fmt.Fprintf(&b, "[service]\n")
 	fmt.Fprintf(&b, "name = %q\n", c.Service.Name)
 	fmt.Fprintf(&b, "exec_path = %q\n\n", c.Service.ExecPath)
@@ -308,6 +330,44 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := strconv.ParseFloat(raw, 64)
 		cfg.FX.BlurStrength = v
 		return err
+	case "light.enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.Light.Enabled = v
+		return err
+	case "light.address":
+		v, err := parseString(raw)
+		cfg.Light.Address = v
+		return err
+	case "light.brightness":
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateLightBrightness(v); err != nil {
+			return err
+		}
+		cfg.Light.Brightness = v
+		return nil
+	case "light.temperature":
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateLightTemperature(v); err != nil {
+			return err
+		}
+		cfg.Light.Temperature = v
+		return nil
+	case "light.timeout_ms":
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateLightTimeout(v); err != nil {
+			return err
+		}
+		cfg.Light.TimeoutMS = v
+		return nil
 	case "service.name":
 		v, err := parseString(raw)
 		cfg.Service.Name = v
@@ -329,6 +389,27 @@ func assign(cfg *Config, section, key, raw string) error {
 	default:
 		return fmt.Errorf("unknown key %q in section %q", key, section)
 	}
+}
+
+func ValidateLightBrightness(value int) error {
+	if value < 0 || value > 100 {
+		return fmt.Errorf("invalid light brightness %d: expected 0-100", value)
+	}
+	return nil
+}
+
+func ValidateLightTemperature(value int) error {
+	if value < 143 || value > 344 {
+		return fmt.Errorf("invalid light temperature %d: expected 143-344", value)
+	}
+	return nil
+}
+
+func ValidateLightTimeout(value int) error {
+	if value < 100 || value > 30000 {
+		return fmt.Errorf("invalid light timeout_ms %d: expected 100-30000", value)
+	}
+	return nil
 }
 
 func ValidateCameraFormat(format string) error {

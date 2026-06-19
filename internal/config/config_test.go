@@ -37,6 +37,12 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`model_dir = "/usr/local/VideoFX/lib/models"`,
 		`enable_os_release_shim = true`,
 		`blur_strength = 0.75`,
+		`[light]`,
+		`enabled = false`,
+		`address = ""`,
+		`brightness = 20`,
+		`temperature = 206`,
+		`timeout_ms = 1500`,
 		`theme = "system"`,
 	} {
 		if !strings.Contains(rendered, want) {
@@ -59,6 +65,9 @@ func TestRenderAndParseDefault(t *testing.T) {
 	}
 	if !parsed.FX.Enabled || parsed.FX.Mode != "blur" || parsed.FX.BackgroundImage != "" || parsed.FX.ChromaColor != "#00ff00" || parsed.FX.SDKPath != "/usr/local/VideoFX" || parsed.FX.ModelDir != "/usr/local/VideoFX/lib/models" || !parsed.FX.EnableOSReleaseShim || parsed.FX.BlurStrength != 0.75 {
 		t.Fatalf("unexpected parsed fx config: %+v", parsed.FX)
+	}
+	if parsed.Light.Enabled || parsed.Light.Address != "" || parsed.Light.Brightness != 20 || parsed.Light.Temperature != 206 || parsed.Light.TimeoutMS != 1500 {
+		t.Fatalf("unexpected parsed light config: %+v", parsed.Light)
 	}
 }
 
@@ -107,5 +116,26 @@ func TestValidateChromaColor(t *testing.T) {
 		if err := ValidateChromaColor(color); err == nil {
 			t.Fatalf("expected %q to be invalid", color)
 		}
+	}
+}
+
+func TestValidateLightConfig(t *testing.T) {
+	if err := ValidateLightBrightness(100); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateLightBrightness(101); err == nil {
+		t.Fatal("expected invalid brightness")
+	}
+	if err := ValidateLightTemperature(206); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateLightTemperature(500); err == nil {
+		t.Fatal("expected invalid temperature")
+	}
+	if err := ValidateLightTimeout(1500); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateLightTimeout(10); err == nil {
+		t.Fatal("expected invalid timeout")
 	}
 }
