@@ -235,6 +235,33 @@ func RunStream(ctx context.Context, cfg config.Config, opts StreamOptions, logf 
 	}
 }
 
+func RunTransfer(ctx context.Context, cfg config.Config, opts StreamOptions, logf func(string, ...any)) error {
+	opts = normalizeStreamOptions(cfg, opts)
+	if err := validateTransferOptions(opts); err != nil {
+		return err
+	}
+	if missing := MissingDependencies(cfg); len(missing) > 0 {
+		return fmt.Errorf("missing dependencies: %s", strings.Join(missing, ", "))
+	}
+	env, result := maxineEnv(cfg)
+	if result.HelperPath == "" {
+		return errors.New("Maxine helper binary not found; run make build")
+	}
+	group, err := startProcessGroup(ctx, "fx-transfer", nil, logf, []commandSpec{
+		{Name: result.HelperPath, Args: NativeTransferHelperArgs(result, opts), Env: env},
+	})
+	if err != nil {
+		return err
+	}
+	defer group.Stop(2 * time.Second)
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-group.done:
+		return errors.New("fx transfer pipeline exited")
+	}
+}
+
 func normalizeStreamOptions(cfg config.Config, opts StreamOptions) StreamOptions {
 	if opts.InputDevice == "" {
 		opts.InputDevice = fxInputDevice(cfg)
@@ -311,6 +338,28 @@ func validateStreamOptions(opts StreamOptions) error {
 	}
 	if opts.DenoiseEnabled && opts.Height > 1080 {
 		return fmt.Errorf("fx denoise supports up to 1080p input height, got %d; disable denoise or lower fx.height", opts.Height)
+	}
+	return nil
+}
+
+func validateTransferOptions(opts StreamOptions) error {
+	if opts.InputDevice == "" {
+		return errors.New("--input is required")
+	}
+	if !strings.EqualFold(opts.InputFormat, "nv12") {
+		return fmt.Errorf("fx transfer input format must be nv12, got %q", opts.InputFormat)
+	}
+	if opts.OutputDevice == "" {
+		return errors.New("--output is required")
+	}
+	if err := config.ValidateOutputFormat(opts.OutputFormat); err != nil {
+		return err
+	}
+	if opts.Width < 512 || opts.Height < 288 {
+		return fmt.Errorf("fx transfer size must be at least 512x288, got %dx%d", opts.Width, opts.Height)
+	}
+	if opts.FPS <= 0 {
+		return fmt.Errorf("fx transfer fps must be positive, got %d", opts.FPS)
 	}
 	return nil
 }
@@ -399,6 +448,21 @@ func NativeStreamHelperArgs(result DoctorResult, opts StreamOptions, replacement
 		"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
 		"--denoise", boolArg(opts.DenoiseEnabled),
 		"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
+	}
+}
+
+func NativeTransferHelperArgs(result DoctorResult, opts StreamOptions) []string {
+	return []string{
+		"native-transfer",
+		"--sdk-path", result.SDKPath,
+		"--model-dir", result.ModelDir,
+		"--input-device", opts.InputDevice,
+		"--input-format", opts.InputFormat,
+		"--output-device", opts.OutputDevice,
+		"--output-format", opts.OutputFormat,
+		"--width", strconv.Itoa(opts.Width),
+		"--height", strconv.Itoa(opts.Height),
+		"--fps", strconv.Itoa(opts.FPS),
 	}
 }
 

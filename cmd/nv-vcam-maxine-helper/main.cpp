@@ -378,6 +378,52 @@ void compositeReplacement(const std::vector<unsigned char> &foreground,
   }
 }
 
+void resizeBGRNearest(const std::vector<unsigned char> &src, int srcWidth, int srcHeight,
+                      int dstWidth, int dstHeight, std::vector<unsigned char> &dst) {
+  if (srcWidth == dstWidth && srcHeight == dstHeight) {
+    dst = src;
+    return;
+  }
+  dst.resize(static_cast<size_t>(dstWidth) * dstHeight * 3);
+  for (int y = 0; y < dstHeight; ++y) {
+    const int srcY = std::min(srcHeight - 1, y * srcHeight / dstHeight);
+    for (int x = 0; x < dstWidth; ++x) {
+      const int srcX = std::min(srcWidth - 1, x * srcWidth / dstWidth);
+      const size_t srcI = (static_cast<size_t>(srcY) * srcWidth + srcX) * 3;
+      const size_t dstI = (static_cast<size_t>(y) * dstWidth + x) * 3;
+      dst[dstI + 0] = src[srcI + 0];
+      dst[dstI + 1] = src[srcI + 1];
+      dst[dstI + 2] = src[srcI + 2];
+    }
+  }
+}
+
+struct FrameSize {
+  int width = 0;
+  int height = 0;
+};
+
+FrameSize effectFrameSize(int width, int height) {
+  const int maxWidth = 960;
+  const int maxHeight = 540;
+  if (width <= maxWidth && height <= maxHeight) {
+    return {width, height};
+  }
+
+  int scaledWidth = width;
+  int scaledHeight = height;
+  if (width * maxHeight > height * maxWidth) {
+    scaledWidth = maxWidth;
+    scaledHeight = height * maxWidth / width;
+  } else {
+    scaledHeight = maxHeight;
+    scaledWidth = width * maxHeight / height;
+  }
+  scaledWidth = std::max(512, scaledWidth & ~1);
+  scaledHeight = std::max(288, scaledHeight & ~1);
+  return {scaledWidth, scaledHeight};
+}
+
 ImageBGR syntheticBGR() {
   ImageBGR out;
   out.width = 512;
@@ -410,11 +456,10 @@ public:
       }
       ImageBGR bg = readPPMAsBGR(opts_.replacement);
       if (bg.width != width_ || bg.height != height_) {
-        std::fprintf(stderr, "error: replacement image must be %dx%d, got %dx%d\n",
-                     width_, height_, bg.width, bg.height);
-        std::exit(1);
+        resizeBGRNearest(bg.pixels, bg.width, bg.height, width_, height_, replacement_);
+      } else {
+        replacement_ = bg.pixels;
       }
-      replacement_ = bg.pixels;
     } else if (opts_.background == "chroma") {
       unsigned char color[3] = {};
       parseChromaBGR(opts_.chromaColor, color);
@@ -658,6 +703,70 @@ private:
   NvCVImage staging_{};
 };
 
+class TransferProcessor {
+public:
+  TransferProcessor(int width, int height)
+      : width_(width), height_(height),
+        bgr_(static_cast<size_t>(width) * height * 3) {
+    init();
+  }
+
+  ~TransferProcessor() { cleanup(); }
+
+  bool runNV12(const unsigned char *frame) {
+    NvCVImage cpuNv12{};
+    NvCV_Status status = NvCVImage_Init(&cpuNv12, width_, height_, width_,
+                                        const_cast<unsigned char *>(frame),
+                                        NVCV_YUV420, NVCV_U8, NVCV_NV12,
+                                        NVCV_CPU);
+    if (!checkFrame(status, "NvCVImage_Init(cpu NV12 input)")) {
+      return false;
+    }
+    cpuNv12.colorspace = NVCV_709 | NVCV_VIDEO_RANGE | NVCV_CHROMA_COSITED;
+
+    if (!checkFrame(NvCVImage_Transfer(&cpuNv12, &gpuBGR_, 1.0f, stream_, &staging_),
+                    "NvCVImage_Transfer(NV12 CPU->BGR GPU)") ||
+        !checkFrame(NvCVImage_Transfer(&gpuBGR_, &cpuBGR_, 1.0f, stream_, &staging_),
+                    "NvCVImage_Transfer(BGR GPU->BGR CPU)") ||
+        !checkFrame(NvVFX_CudaStreamSynchronize(stream_),
+                    "NvVFX_CudaStreamSynchronize(transfer roundtrip)")) {
+      return false;
+    }
+    return true;
+  }
+
+  const std::vector<unsigned char> &bgr() const { return bgr_; }
+
+private:
+  void init() {
+    check(NvVFX_CudaStreamCreate(&stream_), "NvVFX_CudaStreamCreate");
+    check(NvCVImage_Init(&cpuBGR_, width_, height_, width_ * 3,
+                         bgr_.data(), NVCV_BGR, NVCV_U8, NVCV_INTERLEAVED,
+                         NVCV_CPU),
+          "NvCVImage_Init(cpu BGR output)");
+    check(NvCVImage_Alloc(&gpuBGR_, width_, height_, NVCV_BGR, NVCV_U8,
+                          NVCV_INTERLEAVED, NVCV_GPU, 0),
+          "NvCVImage_Alloc(gpu BGR transfer)");
+  }
+
+  void cleanup() {
+    NvCVImage_Dealloc(&staging_);
+    NvCVImage_Dealloc(&gpuBGR_);
+    if (stream_) {
+      NvVFX_CudaStreamDestroy(stream_);
+      stream_ = nullptr;
+    }
+  }
+
+  int width_ = 0;
+  int height_ = 0;
+  std::vector<unsigned char> bgr_;
+  CUstream stream_ = nullptr;
+  NvCVImage cpuBGR_{};
+  NvCVImage gpuBGR_{};
+  NvCVImage staging_{};
+};
+
 void runGreenScreenAndBlur(const Options &opts, const ImageBGR &input,
                            const std::string &maskPath,
                            const std::string &blurPath) {
@@ -893,7 +1002,7 @@ void writeAllFD(int fd, const std::vector<unsigned char> &buf) {
   }
 }
 
-void nativeStream(const Options &opts) {
+void validateNativeIOOptions(const Options &opts) {
   if (opts.width < 512 || opts.height < 288) {
     std::fprintf(stderr, "error: --width/--height must be at least 512x288, got %dx%d\n",
                  opts.width, opts.height);
@@ -905,7 +1014,10 @@ void nativeStream(const Options &opts) {
   if (fourccForFormat(opts.outputFormat) != V4L2_PIX_FMT_YUV420) {
     fail("--output-format must be yuv420p/yu12");
   }
+}
 
+void nativeStream(const Options &opts) {
+  validateNativeIOOptions(opts);
   int inputFD = open(opts.inputDevice.c_str(), O_RDWR | O_NONBLOCK);
   checkSys(inputFD >= 0, "open input device");
   int outputFD = open(opts.outputDevice.c_str(), O_WRONLY);
@@ -919,7 +1031,15 @@ void nativeStream(const Options &opts) {
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   xioctl(inputFD, VIDIOC_STREAMON, &type, "VIDIOC_STREAMON");
 
-  MaxineProcessor processor(opts, opts.width, opts.height);
+  const FrameSize fxSize = effectFrameSize(opts.width, opts.height);
+  if (fxSize.width != opts.width || fxSize.height != opts.height) {
+    std::fprintf(stderr, "info: native-stream processing FX at %dx%d for %dx%d output\n",
+                 fxSize.width, fxSize.height, opts.width, opts.height);
+  }
+  TransferProcessor transfer(opts.width, opts.height);
+  MaxineProcessor processor(opts, fxSize.width, fxSize.height);
+  std::vector<unsigned char> inputBGR(static_cast<size_t>(opts.width) * opts.height * 3);
+  std::vector<unsigned char> outputBGR(static_cast<size_t>(opts.width) * opts.height * 3);
   std::vector<unsigned char> yu12;
   const size_t expectedFrameSize = static_cast<size_t>(opts.width) * opts.height * 3 / 2;
   bool effectsDisabled = false;
@@ -943,19 +1063,90 @@ void nativeStream(const Options &opts) {
     }
 
     const unsigned char *frame = static_cast<const unsigned char *>(buffers[buf.index].start);
+    const std::vector<unsigned char> *sourceBGR = &inputBGR;
     if (fourccForFormat(opts.inputFormat) == V4L2_PIX_FMT_NV12) {
-      nv12ToBGR(frame, opts.width, opts.height, processor.input());
+      if (!transfer.runNV12(frame)) {
+        fail("native stream transfer failed");
+      }
+      sourceBGR = &transfer.bgr();
     } else {
-      yu12ToBGR(frame, opts.width, opts.height, processor.input());
+      yu12ToBGR(frame, opts.width, opts.height, inputBGR);
     }
+    resizeBGRNearest(*sourceBGR, opts.width, opts.height, fxSize.width, fxSize.height,
+                     processor.input());
     if (effectsDisabled) {
-      processor.final() = processor.input();
+      resizeBGRNearest(processor.input(), fxSize.width, fxSize.height, opts.width, opts.height,
+                       outputBGR);
     } else if (!processor.run()) {
       std::fprintf(stderr, "warning: Maxine failed; using passthrough for this stream\n");
       effectsDisabled = true;
-      processor.final() = processor.input();
+      resizeBGRNearest(processor.input(), fxSize.width, fxSize.height, opts.width, opts.height,
+                       outputBGR);
+    } else {
+      resizeBGRNearest(processor.final(), fxSize.width, fxSize.height, opts.width, opts.height,
+                       outputBGR);
     }
-    bgrToYU12(processor.final(), opts.width, opts.height, yu12);
+    bgrToYU12(outputBGR, opts.width, opts.height, yu12);
+    writeAllFD(outputFD, yu12);
+    xioctl(inputFD, VIDIOC_QBUF, &buf, "VIDIOC_QBUF");
+  }
+
+  xioctl(inputFD, VIDIOC_STREAMOFF, &type, "VIDIOC_STREAMOFF");
+  for (const auto &buffer : buffers) {
+    if (buffer.start && buffer.start != MAP_FAILED) {
+      munmap(buffer.start, buffer.length);
+    }
+  }
+  close(outputFD);
+  close(inputFD);
+}
+
+void nativeTransfer(const Options &opts) {
+  validateNativeIOOptions(opts);
+  if (fourccForFormat(opts.inputFormat) != V4L2_PIX_FMT_NV12) {
+    fail("--input-format must be nv12 for native-transfer");
+  }
+
+  int inputFD = open(opts.inputDevice.c_str(), O_RDWR | O_NONBLOCK);
+  checkSys(inputFD >= 0, "open input device");
+  int outputFD = open(opts.outputDevice.c_str(), O_WRONLY);
+  checkSys(outputFD >= 0, "open output device");
+
+  setCaptureFormat(inputFD, opts);
+  setOutputFormat(outputFD, opts);
+  std::vector<MMapBuffer> buffers = setupInputBuffers(inputFD);
+  queueAllInputBuffers(inputFD, buffers);
+
+  int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  xioctl(inputFD, VIDIOC_STREAMON, &type, "VIDIOC_STREAMON");
+
+  TransferProcessor processor(opts.width, opts.height);
+  std::vector<unsigned char> yu12;
+  const size_t expectedFrameSize = static_cast<size_t>(opts.width) * opts.height * 3 / 2;
+
+  for (;;) {
+    pollfd pfd{};
+    pfd.fd = inputFD;
+    pfd.events = POLLIN;
+    int pr = poll(&pfd, 1, 2000);
+    if (pr < 0 && errno == EINTR) {
+      continue;
+    }
+    checkSys(pr > 0, "poll input device");
+
+    v4l2_buffer buf{};
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    xioctl(inputFD, VIDIOC_DQBUF, &buf, "VIDIOC_DQBUF");
+    if (buf.index >= buffers.size() || buffers[buf.index].length < expectedFrameSize) {
+      fail("input buffer is smaller than expected");
+    }
+
+    const unsigned char *frame = static_cast<const unsigned char *>(buffers[buf.index].start);
+    if (!processor.runNV12(frame)) {
+      fail("native transfer roundtrip failed");
+    }
+    bgrToYU12(processor.bgr(), opts.width, opts.height, yu12);
     writeAllFD(outputFD, yu12);
     xioctl(inputFD, VIDIOC_QBUF, &buf, "VIDIOC_QBUF");
   }
@@ -1069,7 +1260,7 @@ void idleOutput(const Options &opts) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: nv-vcam-maxine-helper doctor|test-image|stream|native-stream [flags]\n");
+    std::fprintf(stderr, "usage: nv-vcam-maxine-helper doctor|test-image|stream|native-stream|native-transfer|idle-output [flags]\n");
     return 2;
   }
 
@@ -1091,6 +1282,10 @@ int main(int argc, char **argv) {
   }
   if (command == "native-stream") {
     nativeStream(opts);
+    return 0;
+  }
+  if (command == "native-transfer") {
+    nativeTransfer(opts);
     return 0;
   }
   if (command == "idle-output") {

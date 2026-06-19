@@ -149,6 +149,14 @@ nv-vcam fx stream --input /dev/video0 --output /dev/video10 --background replace
 nv-vcam fx stream --input /dev/video0 --output /dev/video10 --background chroma --chroma-color '#00ff00'
 ```
 
+Transfer-only diagnostic path:
+
+```bash
+nv-vcam fx transfer --input /dev/video0 --output /dev/video10 --width 1920 --height 1080 --fps 50
+```
+
+This sends NV12 through `NvCVImage_Transfer()` into a GPU BGR buffer and back to CPU BGR, then writes YU12 with the existing output converter. It does not run GreenScreen, BackgroundBlur, chroma, replacement, or denoise.
+
 The normal service path runs the same native helper on demand. `nv-vcam run` watches `/dev/video10`; when an external app opens the virtual camera, it starts `nv-vcam-maxine-helper native-stream`. When no consumer remains, it stops the helper.
 
 On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-vcam` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.

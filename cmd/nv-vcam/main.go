@@ -73,12 +73,13 @@ func usage() {
   nv-vcam fx doctor
   nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--denoise-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
   nv-vcam fx stream [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value] [--denoise] [--denoise-strength 0|1]
+  nv-vcam fx transfer [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50]
   nv-vcam run`)
 }
 
 func fxCmd(args []string) error {
 	if len(args) < 1 {
-		return errors.New("fx requires doctor, test-image, or stream")
+		return errors.New("fx requires doctor, test-image, stream, or transfer")
 	}
 	switch args[0] {
 	case "doctor":
@@ -202,6 +203,28 @@ func fxCmd(args []string) error {
 			BlurStrength:    *blurStrength,
 			DenoiseEnabled:  *denoiseEnabled,
 			DenoiseStrength: *denoiseStrength,
+		}, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		})
+	case "transfer":
+		fs := flag.NewFlagSet("fx transfer", flag.ContinueOnError)
+		input := fs.String("input", "", "input video device")
+		output := fs.String("output", "", "output v4l2loopback video device")
+		width := fs.Int("width", 0, "frame width")
+		height := fs.Int("height", 0, "frame height")
+		fps := fs.Int("fps", 0, "frame rate")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		cfg := loadEffectiveConfig()
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return fx.RunTransfer(ctx, cfg, fx.StreamOptions{
+			InputDevice:  *input,
+			OutputDevice: *output,
+			Width:        *width,
+			Height:       *height,
+			FPS:          *fps,
 		}, func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		})

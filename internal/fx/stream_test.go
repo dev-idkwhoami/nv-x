@@ -61,6 +61,37 @@ func TestNativeStreamHelperArgs(t *testing.T) {
 	}
 }
 
+func TestNativeTransferHelperArgs(t *testing.T) {
+	args := strings.Join(NativeTransferHelperArgs(DoctorResult{
+		SDKPath:  "/opt/VideoFX",
+		ModelDir: "/opt/VideoFX/models",
+	}, StreamOptions{
+		InputDevice:  "/dev/video0",
+		InputFormat:  "nv12",
+		OutputDevice: "/dev/video10",
+		OutputFormat: "yuv420p",
+		Width:        1920,
+		Height:       1080,
+		FPS:          50,
+	}), " ")
+	for _, want := range []string{
+		"native-transfer",
+		"--sdk-path /opt/VideoFX",
+		"--model-dir /opt/VideoFX/models",
+		"--input-device /dev/video0",
+		"--input-format nv12",
+		"--output-device /dev/video10",
+		"--output-format yuv420p",
+		"--width 1920",
+		"--height 1080",
+		"--fps 50",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected %q in args:\n%s", want, args)
+		}
+	}
+}
+
 func TestIdleOutputHelperArgs(t *testing.T) {
 	args := strings.Join(IdleOutputHelperArgs(DoctorResult{}, StreamOptions{
 		OutputDevice: "/dev/video10",
@@ -153,5 +184,24 @@ func TestValidateStreamOptionsRejectsUnsupportedFormats(t *testing.T) {
 	opts.OutputFormat = "nv12"
 	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected invalid output format error")
+	}
+}
+
+func TestValidateTransferOptions(t *testing.T) {
+	opts := normalizeStreamOptions(config.Default(), StreamOptions{})
+	if err := validateTransferOptions(opts); err != nil {
+		t.Fatalf("expected default transfer options to be valid: %v", err)
+	}
+
+	opts = normalizeStreamOptions(config.Default(), StreamOptions{})
+	opts.InputFormat = "yu12"
+	if err := validateTransferOptions(opts); err == nil {
+		t.Fatal("expected non-nv12 input format error")
+	}
+
+	opts = normalizeStreamOptions(config.Default(), StreamOptions{})
+	opts.Width = 320
+	if err := validateTransferOptions(opts); err == nil {
+		t.Fatal("expected small frame size error")
 	}
 }
