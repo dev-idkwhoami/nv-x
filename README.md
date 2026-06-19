@@ -158,6 +158,10 @@ The normal service path runs the same native helper on demand. `nv-vcam run` wat
 
 On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-vcam` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.
 
+## Planned Features
+
+- Animated backgrounds: support a preprocessed frame-folder asset format, such as `manifest.json` plus JPG/PNG frames, that loops during the live camera pipeline without requiring ffmpeg at runtime. Importing arbitrary video containers like WebM/MP4 may be added as an optional conversion step that can use ffmpeg when available, but the live camera service should remain native and ffmpeg-free.
+
 ## Manual Validation
 
 ```bash
