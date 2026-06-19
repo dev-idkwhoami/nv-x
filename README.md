@@ -38,7 +38,6 @@ Runtime:
 - Maxine feature packages installed under `/usr/local/VideoFX/features`:
   - `nvvfxgreenscreen` for segmentation.
   - `nvvfxbackgroundblur` for blur mode.
-  - `nvvfxdenoising` is optional/experimental and off by default.
 - Maxine TensorRT model packages under `/usr/local/VideoFX/lib/models`.
 - `pkexec`/polkit for GUI loopback write/reload elevation.
 - `fuser` from `psmisc` is optional but useful for troubleshooting busy devices.
@@ -115,8 +114,6 @@ sdk_path = "/usr/local/VideoFX"
 model_dir = "/usr/local/VideoFX/lib/models"
 enable_os_release_shim = true
 blur_strength = 0.75
-denoise_enabled = false
-denoise_strength = 0
 ```
 
 `nv-vcam loopback write` renders:
@@ -155,7 +152,7 @@ Transfer-only diagnostic path:
 nv-vcam fx transfer --input /dev/video0 --output /dev/video10 --width 1920 --height 1080 --fps 50
 ```
 
-This sends NV12 through `NvCVImage_Transfer()` into a GPU BGR buffer and back to CPU BGR, then writes YU12 with the existing output converter. It does not run GreenScreen, BackgroundBlur, chroma, replacement, or denoise.
+This sends NV12 through `NvCVImage_Transfer()` into a GPU BGR buffer and back to CPU BGR, then writes YU12 with the existing output converter. It does not run GreenScreen, BackgroundBlur, chroma, or replacement.
 
 The normal service path runs the same native helper on demand. `nv-vcam run` watches `/dev/video10`; when an external app opens the virtual camera, it starts `nv-vcam-maxine-helper native-stream`. When no consumer remains, it stops the helper.
 

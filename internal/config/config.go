@@ -49,8 +49,6 @@ type FXConfig struct {
 	ModelDir            string
 	EnableOSReleaseShim bool
 	BlurStrength        float64
-	DenoiseEnabled      bool
-	DenoiseStrength     int
 }
 
 type ServiceConfig struct {
@@ -91,8 +89,6 @@ func Default() Config {
 			ModelDir:            "/usr/local/VideoFX/lib/models",
 			EnableOSReleaseShim: true,
 			BlurStrength:        0.75,
-			DenoiseEnabled:      false,
-			DenoiseStrength:     0,
 		},
 		Service: ServiceConfig{
 			Name:     "nv-vcam.service",
@@ -166,9 +162,7 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "sdk_path = %q\n", c.FX.SDKPath)
 	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
 	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
-	fmt.Fprintf(&b, "blur_strength = %.2f\n", c.FX.BlurStrength)
-	fmt.Fprintf(&b, "denoise_enabled = %t\n", c.FX.DenoiseEnabled)
-	fmt.Fprintf(&b, "denoise_strength = %d\n\n", c.FX.DenoiseStrength)
+	fmt.Fprintf(&b, "blur_strength = %.2f\n\n", c.FX.BlurStrength)
 	fmt.Fprintf(&b, "[service]\n")
 	fmt.Fprintf(&b, "name = %q\n", c.Service.Name)
 	fmt.Fprintf(&b, "exec_path = %q\n\n", c.Service.ExecPath)
@@ -314,20 +308,6 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := strconv.ParseFloat(raw, 64)
 		cfg.FX.BlurStrength = v
 		return err
-	case "fx.denoise_enabled":
-		v, err := strconv.ParseBool(raw)
-		cfg.FX.DenoiseEnabled = v
-		return err
-	case "fx.denoise_strength":
-		v, err := strconv.Atoi(raw)
-		if err != nil {
-			return err
-		}
-		if v != 0 && v != 1 {
-			return fmt.Errorf("invalid fx denoise_strength %d: expected 0 or 1", v)
-		}
-		cfg.FX.DenoiseStrength = v
-		return nil
 	case "service.name":
 		v, err := parseString(raw)
 		cfg.Service.Name = v

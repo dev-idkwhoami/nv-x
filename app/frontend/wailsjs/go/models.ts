@@ -55,8 +55,6 @@ export namespace config {
 	    ModelDir: string;
 	    EnableOSReleaseShim: boolean;
 	    BlurStrength: number;
-	    DenoiseEnabled: boolean;
-	    DenoiseStrength: number;
 
 	    static createFrom(source: any = {}) {
 	        return new FXConfig(source);
@@ -72,8 +70,6 @@ export namespace config {
 	        this.ModelDir = source["ModelDir"];
 	        this.EnableOSReleaseShim = source["EnableOSReleaseShim"];
 	        this.BlurStrength = source["BlurStrength"];
-	        this.DenoiseEnabled = source["DenoiseEnabled"];
-	        this.DenoiseStrength = source["DenoiseStrength"];
 	    }
 	}
 	export class LoopbackConfig {

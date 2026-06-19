@@ -50,8 +50,6 @@ type StreamOptions struct {
 	BackgroundImage string
 	ChromaColor     string
 	BlurStrength    float64
-	DenoiseEnabled  bool
-	DenoiseStrength int
 }
 
 type Supervisor struct {
@@ -296,12 +294,6 @@ func normalizeStreamOptions(cfg config.Config, opts StreamOptions) StreamOptions
 	if opts.BlurStrength <= 0 {
 		opts.BlurStrength = cfg.FX.BlurStrength
 	}
-	if !opts.DenoiseEnabled {
-		opts.DenoiseEnabled = cfg.FX.DenoiseEnabled
-	}
-	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
-		opts.DenoiseStrength = cfg.FX.DenoiseStrength
-	}
 	return opts
 }
 
@@ -332,12 +324,6 @@ func validateStreamOptions(opts StreamOptions) error {
 	}
 	if err := config.ValidateChromaColor(opts.ChromaColor); err != nil {
 		return err
-	}
-	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
-		return fmt.Errorf("fx stream denoise strength must be 0 or 1, got %d", opts.DenoiseStrength)
-	}
-	if opts.DenoiseEnabled && opts.Height > 1080 {
-		return fmt.Errorf("fx denoise supports up to 1080p input height, got %d; disable denoise or lower fx.height", opts.Height)
 	}
 	return nil
 }
@@ -446,8 +432,6 @@ func NativeStreamHelperArgs(result DoctorResult, opts StreamOptions, replacement
 		"--replacement", replacementPath,
 		"--chroma-color", opts.ChromaColor,
 		"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
-		"--denoise", boolArg(opts.DenoiseEnabled),
-		"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
 	}
 }
 

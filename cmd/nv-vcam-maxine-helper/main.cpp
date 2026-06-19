@@ -18,7 +18,6 @@
 #include "nvCVImage.h"
 #include "nvCVStatus.h"
 #include "nvVFXBackgroundBlur.h"
-#include "nvVFXDenoising.h"
 #include "nvVFXGreenScreen.h"
 #include "nvVideoEffects.h"
 
@@ -37,7 +36,6 @@ struct Options {
   std::string mask;
   std::string blur;
   std::string final;
-  std::string denoiseOutput;
   std::string inputDevice = "/dev/video0";
   std::string inputFormat = "nv12";
   std::string outputDevice = "/dev/video10";
@@ -50,8 +48,6 @@ struct Options {
   int height = 0;
   int fps = 25;
   float blurStrength = 0.75f;
-  bool denoise = false;
-  int denoiseStrength = 0;
 };
 
 struct MMapBuffer {
@@ -447,7 +443,6 @@ public:
         input_(static_cast<size_t>(width) * height * 3),
         mask_(static_cast<size_t>(width) * height),
         blurred_(static_cast<size_t>(width) * height * 3),
-        denoised_(static_cast<size_t>(width) * height * 3),
         replacement_(static_cast<size_t>(width) * height * 3),
         final_(static_cast<size_t>(width) * height * 3) {
     if (opts_.background == "replace") {
@@ -473,28 +468,13 @@ public:
   std::vector<unsigned char> &input() { return input_; }
   std::vector<unsigned char> &mask() { return mask_; }
   std::vector<unsigned char> &blurred() { return blurred_; }
-  std::vector<unsigned char> &denoised() { return denoised_; }
   std::vector<unsigned char> &final() { return final_; }
 
   bool run() {
     NvCVImage *effectInput = &gpuInput_;
-    if (opts_.denoise) {
-      if (!checkFrame(NvCVImage_Transfer(&cpuInput_, &gpuDenoiseInput_, 1.0f, stream_, &staging_),
-                      "NvCVImage_Transfer(denoise input CPU->GPU)") ||
-          !checkFrame(NvVFX_Run(denoise_, 0), "NvVFX_Run(Denoising)") ||
-          !checkFrame(NvVFX_CudaStreamSynchronize(stream_), "NvVFX_CudaStreamSynchronize(Denoising)") ||
-          !checkFrame(NvCVImage_Transfer(&gpuDenoised_, &cpuDenoised_, 1.0f, stream_, &staging_),
-                      "NvCVImage_Transfer(denoise GPU->CPU)") ||
-          !checkFrame(NvCVImage_Transfer(&gpuDenoised_, &gpuInput_, 1.0f, stream_, &staging_),
-                      "NvCVImage_Transfer(denoise GPU->effect GPU)")) {
-        return false;
-      }
-    } else {
-      if (!checkFrame(NvCVImage_Transfer(&cpuInput_, &gpuInput_, 1.0f, stream_, &staging_),
-                      "NvCVImage_Transfer(input CPU->GPU)")) {
-        return false;
-      }
-      denoised_ = input_;
+    if (!checkFrame(NvCVImage_Transfer(&cpuInput_, &gpuInput_, 1.0f, stream_, &staging_),
+                    "NvCVImage_Transfer(input CPU->GPU)")) {
+      return false;
     }
     if (!checkFrame(NvVFX_SetImage(green_, NVVFX_INPUT_IMAGE, effectInput),
                     "NvVFX_SetImage(GreenScreen input)") ||
@@ -531,9 +511,9 @@ public:
     } else if (opts_.background == "mask") {
       maskToBGR(mask_, final_);
     } else if (opts_.background == "chroma") {
-      compositeReplacement(effectSource(), mask_, replacement_, final_);
+      compositeReplacement(input_, mask_, replacement_, final_);
     } else if (opts_.background == "replace") {
-      compositeReplacement(effectSource(), mask_, replacement_, final_);
+      compositeReplacement(input_, mask_, replacement_, final_);
     } else {
       failf("unknown background mode: ", opts_.background);
     }
@@ -542,13 +522,6 @@ public:
 
 private:
   bool usesBlur() const { return opts_.background == "blur"; }
-
-  const std::vector<unsigned char> &effectSource() const {
-    if (opts_.denoise) {
-      return denoised_;
-    }
-    return input_;
-  }
 
   void init() {
     check(NvVFX_CudaStreamCreate(&stream_), "NvVFX_CudaStreamCreate");
@@ -576,10 +549,6 @@ private:
                            NVCV_CPU),
             "NvCVImage_Init(cpu blur)");
     }
-    check(NvCVImage_Init(&cpuDenoised_, width_, height_, width_ * 3,
-                         denoised_.data(), NVCV_BGR, NVCV_U8, NVCV_INTERLEAVED,
-                         NVCV_CPU),
-          "NvCVImage_Init(cpu denoise)");
     check(NvCVImage_Alloc(&gpuInput_, width_, height_, NVCV_BGR, NVCV_U8,
                           NVCV_INTERLEAVED, NVCV_GPU, 0),
           "NvCVImage_Alloc(gpu input)");
@@ -591,33 +560,6 @@ private:
                             NVCV_INTERLEAVED, NVCV_GPU, 0),
             "NvCVImage_Alloc(gpu blur)");
     }
-    if (opts_.denoise) {
-      // Webcam Denoise requires zero-gap rows. Keep this as a separate tight
-      // buffer, then transfer back into the pitched GPU buffer used by
-      // GreenScreen and BackgroundBlur.
-      check(NvCVImage_Alloc(&gpuDenoiseInput_, width_, height_, NVCV_BGR, NVCV_U8,
-                            NVCV_INTERLEAVED, NVCV_GPU, 1),
-            "NvCVImage_Alloc(gpu denoise input)");
-      check(NvCVImage_Alloc(&gpuDenoised_, width_, height_, NVCV_BGR, NVCV_U8,
-                            NVCV_INTERLEAVED, NVCV_GPU, 1),
-            "NvCVImage_Alloc(gpu denoise)");
-      check(NvVFX_CreateEffect(NVVFX_FX_DENOISING, &denoise_), "NvVFX_CreateEffect(Denoising)");
-      check(NvVFX_SetString(denoise_, NVVFX_MODEL_DIRECTORY, opts_.modelDir.c_str()),
-            "NvVFX_SetString(Denoising ModelDir)");
-      check(NvVFX_SetCudaStream(denoise_, NVVFX_CUDA_STREAM, stream_),
-            "NvVFX_SetCudaStream(Denoising)");
-      check(NvVFX_SetF32(denoise_, NVVFX_STRENGTH, static_cast<float>(opts_.denoiseStrength)),
-            "NvVFX_SetF32(Denoising Strength)");
-      check(NvVFX_SetImage(denoise_, NVVFX_INPUT_IMAGE, &gpuDenoiseInput_),
-            "NvVFX_SetImage(Denoising input)");
-      check(NvVFX_SetImage(denoise_, NVVFX_OUTPUT_IMAGE, &gpuDenoised_),
-            "NvVFX_SetImage(Denoising output)");
-      check(NvVFX_Load(denoise_), "NvVFX_Load(Denoising)");
-      check(NvVFX_AllocateState(denoise_, &denoiseState_), "NvVFX_AllocateState(Denoising)");
-      check(NvVFX_SetStateObjectHandleArray(denoise_, NVVFX_STATE, &denoiseState_),
-            "NvVFX_SetStateObjectHandleArray(Denoising)");
-    }
-
     check(NvVFX_SetImage(green_, NVVFX_INPUT_IMAGE, &gpuInput_),
           "NvVFX_SetImage(GreenScreen input)");
     check(NvVFX_SetImage(green_, NVVFX_OUTPUT_IMAGE, &gpuMask_),
@@ -645,19 +587,9 @@ private:
 
   void cleanup() {
     NvCVImage_Dealloc(&staging_);
-    NvCVImage_Dealloc(&gpuDenoised_);
-    NvCVImage_Dealloc(&gpuDenoiseInput_);
     NvCVImage_Dealloc(&gpuBlur_);
     NvCVImage_Dealloc(&gpuMask_);
     NvCVImage_Dealloc(&gpuInput_);
-    if (denoiseState_) {
-      NvVFX_DeallocateState(denoise_, denoiseState_);
-      denoiseState_ = nullptr;
-    }
-    if (denoise_) {
-      NvVFX_DestroyEffect(denoise_);
-      denoise_ = nullptr;
-    }
     if (blur_) {
       NvVFX_DestroyEffect(blur_);
       blur_ = nullptr;
@@ -682,24 +614,18 @@ private:
   std::vector<unsigned char> input_;
   std::vector<unsigned char> mask_;
   std::vector<unsigned char> blurred_;
-  std::vector<unsigned char> denoised_;
   std::vector<unsigned char> replacement_;
   std::vector<unsigned char> final_;
   CUstream stream_ = nullptr;
-  NvVFX_Handle denoise_ = nullptr;
   NvVFX_Handle green_ = nullptr;
   NvVFX_Handle blur_ = nullptr;
-  NvVFX_StateObjectHandle denoiseState_ = nullptr;
   NvVFX_StateObjectHandle greenState_ = nullptr;
   NvCVImage cpuInput_{};
   NvCVImage cpuMask_{};
   NvCVImage cpuBlur_{};
-  NvCVImage cpuDenoised_{};
   NvCVImage gpuInput_{};
   NvCVImage gpuMask_{};
   NvCVImage gpuBlur_{};
-  NvCVImage gpuDenoiseInput_{};
-  NvCVImage gpuDenoised_{};
   NvCVImage staging_{};
 };
 
@@ -784,9 +710,6 @@ void runGreenScreenAndBlur(const Options &opts, const ImageBGR &input,
   if (!opts.final.empty()) {
     writePPMFromBGR(opts.final, processor.final(), input.width, input.height);
   }
-  if (!opts.denoiseOutput.empty()) {
-    writePPMFromBGR(opts.denoiseOutput, processor.denoised(), input.width, input.height);
-  }
 }
 
 Options optionsFromFlags(const std::map<std::string, std::string> &flags) {
@@ -797,7 +720,6 @@ Options optionsFromFlags(const std::map<std::string, std::string> &flags) {
   opts.mask = flag(flags, "mask");
   opts.blur = flag(flags, "blur");
   opts.final = flag(flags, "final");
-  opts.denoiseOutput = flag(flags, "denoise-output");
   opts.inputDevice = flag(flags, "input-device", opts.inputDevice);
   opts.inputFormat = flag(flags, "input-format", opts.inputFormat);
   opts.outputDevice = flag(flags, "output-device", opts.outputDevice);
@@ -822,11 +744,6 @@ Options optionsFromFlags(const std::map<std::string, std::string> &flags) {
   if (!fps.empty()) {
     opts.fps = std::atoi(fps.c_str());
   }
-  opts.denoise = parseBool(flag(flags, "denoise", "0"));
-  const std::string denoiseStrength = flag(flags, "denoise-strength");
-  if (!denoiseStrength.empty()) {
-    opts.denoiseStrength = std::atoi(denoiseStrength.c_str());
-  }
   return opts;
 }
 
@@ -838,9 +755,6 @@ void doctor(const Options &opts) {
   std::printf("sdk_version=%u.%u.%u\n", (version >> 24) & 0xff,
               (version >> 16) & 0xff, (version >> 8) & 0xff);
   std::printf("maxine_smoke_ok=true\n");
-  if (opts.denoise) {
-    std::printf("denoise_smoke_ok=true\n");
-  }
 }
 
 void testImage(const Options &opts) {
@@ -856,9 +770,6 @@ void testImage(const Options &opts) {
   if (opts.final.empty()) {
     fail("--final is required");
   }
-  if (opts.denoiseOutput.empty()) {
-    fail("--denoise-output is required");
-  }
   ImageBGR input = readPPMAsBGR(opts.input);
   runGreenScreenAndBlur(opts, input, opts.mask, opts.blur);
   std::printf("width=%d\n", input.width);
@@ -866,7 +777,6 @@ void testImage(const Options &opts) {
   std::printf("mask=%s\n", opts.mask.c_str());
   std::printf("blur=%s\n", opts.blur.c_str());
   std::printf("final=%s\n", opts.final.c_str());
-  std::printf("denoise=%s\n", opts.denoiseOutput.c_str());
 }
 
 bool readExact(FILE *f, std::vector<unsigned char> &buf) {

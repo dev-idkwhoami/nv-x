@@ -51,13 +51,10 @@ type TestImageOptions struct {
 	RemovedPath     string
 	MaskPath        string
 	FinalPath       string
-	DenoisePath     string
 	BackgroundMode  string
 	BackgroundImage string
 	ChromaColor     string
 	BlurStrength    float64
-	DenoiseEnabled  bool
-	DenoiseStrength int
 }
 
 type TestImageResult struct {
@@ -66,7 +63,6 @@ type TestImageResult struct {
 	RemovedPath     string
 	MaskPath        string
 	FinalPath       string
-	DenoisePath     string
 	Width           int
 	Height          int
 	Runtime         string
@@ -74,8 +70,6 @@ type TestImageResult struct {
 	BackgroundImage string
 	ChromaColor     string
 	BlurStrength    float64
-	DenoiseEnabled  bool
-	DenoiseStrength int
 }
 
 func Doctor(cfg config.Config) DoctorResult {
@@ -112,8 +106,6 @@ func Doctor(cfg config.Config) DoctorResult {
 		"--model-dir", result.ModelDir,
 		"--background", doctorBackgroundMode,
 		"--blur-strength", fmt.Sprintf("%.3f", cfg.FX.BlurStrength),
-		"--denoise", boolArg(cfg.FX.DenoiseEnabled),
-		"--denoise-strength", strconv.Itoa(cfg.FX.DenoiseStrength),
 	)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -161,13 +153,6 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if err := config.ValidateChromaColor(opts.ChromaColor); err != nil {
 		return TestImageResult{}, err
 	}
-	if !opts.DenoiseEnabled {
-		opts.DenoiseEnabled = cfg.FX.DenoiseEnabled
-	}
-	if opts.DenoiseStrength != 0 && opts.DenoiseStrength != 1 {
-		opts.DenoiseStrength = cfg.FX.DenoiseStrength
-	}
-
 	env, doctor := maxineEnv(cfg)
 	if doctor.HelperPath == "" {
 		return TestImageResult{}, fmt.Errorf("Maxine helper binary not found; run make build")
@@ -188,10 +173,6 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if width < 512 || height < 288 {
 		return TestImageResult{}, fmt.Errorf("Maxine test image must be at least 512x288, got %dx%d", width, height)
 	}
-	if opts.DenoiseEnabled && height > 1080 {
-		return TestImageResult{}, fmt.Errorf("Maxine denoise supports up to 1080p input height, got %d; disable denoise or use a smaller input image", height)
-	}
-
 	dir, err := os.MkdirTemp("", "nv-vcam-fx-*")
 	if err != nil {
 		return TestImageResult{}, err
@@ -202,7 +183,6 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	maskPGM := filepath.Join(dir, "mask.pgm")
 	blurPPM := filepath.Join(dir, "blur.ppm")
 	finalPPM := filepath.Join(dir, "final.ppm")
-	denoisePPM := filepath.Join(dir, "denoise.ppm")
 	if err := WritePPM(inputPPM, src); err != nil {
 		return TestImageResult{}, err
 	}
@@ -214,12 +194,9 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 		"--mask", maskPGM,
 		"--blur", blurPPM,
 		"--final", finalPPM,
-		"--denoise-output", denoisePPM,
 		"--background", opts.BackgroundMode,
 		"--blur-strength", fmt.Sprintf("%.3f", opts.BlurStrength),
 		"--chroma-color", opts.ChromaColor,
-		"--denoise", boolArg(opts.DenoiseEnabled),
-		"--denoise-strength", strconv.Itoa(opts.DenoiseStrength),
 	)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -239,11 +216,6 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if err != nil {
 		return TestImageResult{}, err
 	}
-	denoised, err := ReadPPM(denoisePPM)
-	if err != nil {
-		return TestImageResult{}, err
-	}
-
 	if opts.MaskPath != "" {
 		if err := SaveImage(opts.MaskPath, mask); err != nil {
 			return TestImageResult{}, err
@@ -270,19 +242,12 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 			}
 		}
 	}
-	if opts.DenoisePath != "" {
-		if err := SaveImage(opts.DenoisePath, denoised); err != nil {
-			return TestImageResult{}, err
-		}
-	}
-
 	return TestImageResult{
 		InputPath:       opts.InputPath,
 		BlurPath:        opts.BlurPath,
 		RemovedPath:     opts.RemovedPath,
 		MaskPath:        opts.MaskPath,
 		FinalPath:       opts.FinalPath,
-		DenoisePath:     opts.DenoisePath,
 		Width:           width,
 		Height:          height,
 		Runtime:         "maxine",
@@ -290,8 +255,6 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 		BackgroundImage: opts.BackgroundImage,
 		ChromaColor:     opts.ChromaColor,
 		BlurStrength:    opts.BlurStrength,
-		DenoiseEnabled:  opts.DenoiseEnabled,
-		DenoiseStrength: opts.DenoiseStrength,
 	}, nil
 }
 
@@ -308,7 +271,6 @@ func maxineEnv(cfg config.Config) ([]string, DoctorResult) {
 		filepath.Join(sdkPath, "external", "tensorrt", "lib"),
 		filepath.Join(sdkPath, "features", "nvvfxgreenscreen", "lib"),
 		filepath.Join(sdkPath, "features", "nvvfxbackgroundblur", "lib"),
-		filepath.Join(sdkPath, "features", "nvvfxdenoising", "lib"),
 	}
 	env := os.Environ()
 	env = upsertEnv(env, "LD_LIBRARY_PATH", strings.Join(append(libPaths, envValue("LD_LIBRARY_PATH")...), string(os.PathListSeparator)))

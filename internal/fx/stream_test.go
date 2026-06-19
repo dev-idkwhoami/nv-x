@@ -16,7 +16,7 @@ func TestNormalizeStreamOptionsUsesNativeDefaults(t *testing.T) {
 	if opts.OutputDevice != "/dev/video10" || opts.OutputFormat != "yuv420p" {
 		t.Fatalf("unexpected output defaults: %+v", opts)
 	}
-	if opts.Width != 1920 || opts.Height != 1080 || opts.FPS != 50 || opts.BackgroundMode != "blur" || opts.BackgroundImage != "" || opts.ChromaColor != "#00ff00" || opts.BlurStrength != 0.75 || opts.DenoiseEnabled || opts.DenoiseStrength != 0 {
+	if opts.Width != 1920 || opts.Height != 1080 || opts.FPS != 50 || opts.BackgroundMode != "blur" || opts.BackgroundImage != "" || opts.ChromaColor != "#00ff00" || opts.BlurStrength != 0.75 {
 		t.Fatalf("unexpected geometry/effect defaults: %+v", opts)
 	}
 }
@@ -26,17 +26,16 @@ func TestNativeStreamHelperArgs(t *testing.T) {
 		SDKPath:  "/opt/VideoFX",
 		ModelDir: "/opt/VideoFX/models",
 	}, StreamOptions{
-		InputDevice:     "/dev/video0",
-		InputFormat:     "nv12",
-		OutputDevice:    "/dev/video10",
-		OutputFormat:    "yuv420p",
-		Width:           1920,
-		Height:          1080,
-		FPS:             50,
-		BackgroundMode:  "chroma",
-		ChromaColor:     "#00ff00",
-		BlurStrength:    0.75,
-		DenoiseStrength: 0,
+		InputDevice:    "/dev/video0",
+		InputFormat:    "nv12",
+		OutputDevice:   "/dev/video10",
+		OutputFormat:   "yuv420p",
+		Width:          1920,
+		Height:         1080,
+		FPS:            50,
+		BackgroundMode: "chroma",
+		ChromaColor:    "#00ff00",
+		BlurStrength:   0.75,
 	}, ""), " ")
 	for _, want := range []string{
 		"native-stream",
@@ -52,8 +51,6 @@ func TestNativeStreamHelperArgs(t *testing.T) {
 		"--background chroma",
 		"--chroma-color #00ff00",
 		"--blur-strength 0.750",
-		"--denoise 0",
-		"--denoise-strength 0",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("expected %q in args:\n%s", want, args)
@@ -134,16 +131,15 @@ func TestValidateStreamOptionsRejectsSmallFrames(t *testing.T) {
 
 func TestValidateStreamOptionsRejectsInvalidEffects(t *testing.T) {
 	base := StreamOptions{
-		InputDevice:     "/dev/video0",
-		InputFormat:     "nv12",
-		OutputDevice:    "/dev/video10",
-		OutputFormat:    "yuv420p",
-		Width:           1920,
-		Height:          1080,
-		FPS:             50,
-		BackgroundMode:  "blur",
-		ChromaColor:     "#00ff00",
-		DenoiseStrength: 0,
+		InputDevice:    "/dev/video0",
+		InputFormat:    "nv12",
+		OutputDevice:   "/dev/video10",
+		OutputFormat:   "yuv420p",
+		Width:          1920,
+		Height:         1080,
+		FPS:            50,
+		BackgroundMode: "blur",
+		ChromaColor:    "#00ff00",
 	}
 	opts := base
 	opts.BackgroundMode = "matte"
@@ -156,21 +152,10 @@ func TestValidateStreamOptionsRejectsInvalidEffects(t *testing.T) {
 		t.Fatal("expected missing replacement image error")
 	}
 	opts = base
-	opts.DenoiseStrength = 3
-	if err := validateStreamOptions(opts); err == nil {
-		t.Fatal("expected invalid denoise strength error")
-	}
-	opts = base
 	opts.BackgroundMode = "chroma"
 	opts.ChromaColor = "00ff00"
 	if err := validateStreamOptions(opts); err == nil {
 		t.Fatal("expected invalid chroma color error")
-	}
-	opts = base
-	opts.Height = 1440
-	opts.DenoiseEnabled = true
-	if err := validateStreamOptions(opts); err == nil {
-		t.Fatal("expected denoise max height error")
 	}
 }
 
