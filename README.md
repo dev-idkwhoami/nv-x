@@ -34,6 +34,8 @@ Runtime:
 - Linux with systemd user services.
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - Cam Link or another V4L2 input that can provide `NV12 1920x1080 @ 50fps`.
+- NVIDIA NGC CLI installed and authenticated with `ngc config set` for SDK Core download.
+- NVIDIA NGC API key exported as `NGC_CLI_API_KEY` for Maxine feature installation.
 - NVIDIA Maxine Video Effects SDK Core installed under `/usr/local/VideoFX`.
 - Maxine feature packages installed under `/usr/local/VideoFX/features`:
   - `nvvfxgreenscreen` for segmentation.
@@ -63,7 +65,14 @@ Install the Wails v2 CLI with Go:
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-Install NVIDIA Maxine from NGC into `/usr/local/VideoFX` before using FX commands. The app checks for Maxine headers/libraries and model files with `nv-vcam fx doctor`.
+Set up the NVIDIA NGC CLI before first setup:
+
+```bash
+ngc config set
+export NGC_CLI_API_KEY=<your-ngc-api-key>
+```
+
+`nv-vcam setup` downloads `nvidia/maxine/vfx_sdk_core:1.2.0.0_linux` from NGC, extracts it into `/usr/local/VideoFX`, then runs NVIDIA's feature installer for the required GreenScreen and BackgroundBlur packages.
 
 ## Build And Install
 
@@ -76,10 +85,23 @@ make install
 `make install` installs the CLI/service binary to `~/.local/bin/nv-vcam`, the Maxine helper to `~/.local/bin/nv-vcam-maxine-helper`, and the CachyOS/Arch compatibility shim to `~/.local/lib/nv-vcam/nv-vcam-os-release-shim.so`.
 
 ```bash
-nv-vcam config write
-sudo nv-vcam loopback write
-nv-vcam loopback reload
-nv-vcam service install --enable --start
+export NGC_CLI_API_KEY=<your-ngc-api-key>
+nv-vcam setup
+```
+
+Run `nv-vcam setup` as your normal desktop user, not with `sudo`. Setup validates sudo once up front, then invokes `sudo` only for the root-scoped parts: extracting SDK Core into `/usr/local`, writing `/etc/modprobe.d/nv-vcam-v4l2loopback.conf`, and reloading `v4l2loopback`. The service is a systemd user service and must be installed for your desktop account.
+
+`nv-vcam setup` creates the user config if missing, downloads and extracts the Maxine SDK Core tarball if `/usr/local/VideoFX` is not present, installs `nvvfxgreenscreen,nvvfxbackgroundblur`, writes and reloads the v4l2loopback config with sudo subcommands, installs/enables/starts the user service, and finishes with `fx doctor`.
+
+Useful partial setup flags:
+
+```bash
+nv-vcam setup --dry-run
+nv-vcam setup --skip-sdk
+nv-vcam setup --skip-maxine
+nv-vcam setup --skip-loopback
+nv-vcam setup --skip-service
+nv-vcam setup --force
 ```
 
 ## Config
@@ -167,8 +189,7 @@ On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `n
 ```bash
 v4l2-ctl -d /dev/video0 --list-formats-ext
 nv-vcam loopback write --dry-run
-sudo nv-vcam loopback write
-nv-vcam loopback reload
+nv-vcam setup --dry-run
 nv-vcam run
 ```
 

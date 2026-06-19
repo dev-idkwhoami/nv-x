@@ -43,7 +43,8 @@ install:
 	install -m 0755 bin/nv-vcam-os-release-shim.so "$(HOME)/.local/lib/nv-vcam/nv-vcam-os-release-shim.so"
 	@echo "installed CLI to $(HOME)/.local/bin/nv-vcam"
 	@echo "installed Maxine helper to $(HOME)/.local/bin/nv-vcam-maxine-helper"
-	@echo "run 'nv-vcam service install --enable --start' or use the app Service tab to install/start the user service"
+	@echo "installed Maxine OS shim to $(HOME)/.local/lib/nv-vcam/nv-vcam-os-release-shim.so"
+	@echo "make sure $(HOME)/.local/bin is on PATH, then run 'nv-vcam setup'"
 
 uninstall:
 	-systemctl --user stop nv-vcam.service
@@ -55,6 +56,13 @@ uninstall:
 	rm -f "$(HOME)/.local/lib/nv-vcam/nv-vcam-os-release-shim.so"
 	-sudo rm -f /etc/modprobe.d/nv-vcam-v4l2loopback.conf
 	-systemctl --user daemon-reload
+	@if [ "$(REMOVE_MAXINE)" = "1" ]; then \
+		echo "removing Maxine SDK at $(MAXINE_SDK)"; \
+		sudo rm -rf "$(MAXINE_SDK)"; \
+	else \
+		echo "left Maxine SDK untouched at $(MAXINE_SDK)"; \
+		echo "run 'make uninstall REMOVE_MAXINE=1' to remove it too"; \
+	fi
 
 test:
 	GOCACHE="$(GOCACHE)" go test $(GO_PACKAGES)

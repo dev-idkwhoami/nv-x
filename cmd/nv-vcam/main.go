@@ -18,6 +18,7 @@ import (
 	"nv-vcam/internal/loopback"
 	"nv-vcam/internal/runner"
 	svc "nv-vcam/internal/service"
+	"nv-vcam/internal/setup"
 )
 
 func main() {
@@ -48,6 +49,10 @@ func run(args []string) error {
 		return serviceCmd(ctx, args[2:])
 	case "fx":
 		return fxCmd(args[2:])
+	case "setup":
+		setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer setupCancel()
+		return setupCmd(setupCtx, args[2:])
 	case "run":
 		cfg := loadEffectiveConfig()
 		return runner.Run(context.Background(), cfg)
@@ -74,6 +79,7 @@ func usage() {
   nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
   nv-vcam fx stream [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
   nv-vcam fx transfer [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50]
+  nv-vcam setup [--force] [--dry-run] [--skip-sdk] [--skip-maxine] [--skip-loopback] [--skip-service]
   nv-vcam run`)
 }
 
@@ -366,6 +372,46 @@ func dryRunOnly(args []string, name string) (bool, error) {
 		return false, err
 	}
 	return *dryRun, nil
+}
+
+func setupCmd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	force := fs.Bool("force", false, "overwrite existing config, loopback config, and service file")
+	dryRun := fs.Bool("dry-run", false, "print changes and commands without writing or running")
+	skipConfig := fs.Bool("skip-config", false, "skip user config creation")
+	skipSDK := fs.Bool("skip-sdk", false, "skip Maxine SDK Core extraction")
+	skipMaxine := fs.Bool("skip-maxine", false, "skip Maxine feature installation and doctor")
+	skipLoopback := fs.Bool("skip-loopback", false, "skip loopback config and reload")
+	skipReload := fs.Bool("skip-reload", false, "skip v4l2loopback reload")
+	skipService := fs.Bool("skip-service", false, "skip user service install")
+	noEnable := fs.Bool("no-enable", false, "do not enable the user service")
+	noStart := fs.Bool("no-start", false, "do not start the user service")
+	features := fs.String("features", "nvvfxgreenscreen,nvvfxbackgroundblur", "comma-separated Maxine features to install")
+	gpu := fs.String("gpu", "", "optional Maxine feature installer GPU architecture")
+	featureVersion := fs.String("feature-version", "", "optional Maxine feature version")
+	ngcOrg := fs.String("ngc-org", "nvidia", "NGC org for Maxine feature install")
+	ngcTeam := fs.String("ngc-team", "maxine", "NGC team for Maxine feature install")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := loadEffectiveConfig()
+	return setup.Run(ctx, cfg, setup.Options{
+		Force:        *force,
+		DryRun:       *dryRun,
+		SkipConfig:   *skipConfig,
+		SkipSDK:      *skipSDK,
+		SkipMaxine:   *skipMaxine,
+		SkipLoopback: *skipLoopback,
+		SkipReload:   *skipReload,
+		SkipService:  *skipService,
+		Enable:       !*noEnable,
+		Start:        !*noStart,
+		Features:     *features,
+		GPU:          *gpu,
+		Version:      *featureVersion,
+		NGCOrg:       *ngcOrg,
+		NGCTeam:      *ngcTeam,
+	})
 }
 
 func list(ctx context.Context) error {
