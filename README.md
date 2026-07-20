@@ -381,3 +381,6 @@ The installed desktop app from `make desktop` is launched as `nv-x-gui`. The use
 ## License
 
 NV-X's original source code and project assets are available under the [MIT License](LICENSE). Dependencies and third-party materials remain under their own terms. NVIDIA Maxine SDKs, models, and NGC resources are not relicensed or redistributed by this repository; consult the license files supplied with each NVIDIA download before use or distribution.
+
+> [!NOTE]
+> NV-X is an independent open-source project and is not affiliated with, endorsed by, sponsored by, or supported by NVIDIA Corporation. NVIDIA, NVIDIA Maxine, NVIDIA NGC, and related names and marks are trademarks or registered trademarks of NVIDIA Corporation in the United States and other countries. All other trademarks belong to their respective owners.
