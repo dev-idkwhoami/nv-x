@@ -22,8 +22,10 @@ The audio path runs independently in the same user service:
 PipeWire physical/default microphone
   -> nv-x-audio
        NVIDIA AFX dereverb + denoise, or Studio Voice Low Latency
-  -> PipeWire source "NV-X Microphone"
-  -> Teams/Zoom/Discord/browser/etc.
+       -> PipeWire source "NV-X Microphone"
+          -> Teams/Zoom/Discord/browser/etc.
+       -> optional processed self-hearing
+          -> selected/default PipeWire output
 ```
 
 Default mode is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU12/yuv420p` `1920x1080 @ 50fps`.
@@ -40,7 +42,7 @@ Default mode is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU
 - One optional PipeWire virtual microphone with mutually exclusive dereverb/denoise and Studio Voice effects.
 - Demand-driven microphone capture: the virtual source remains available, while the physical microphone and AFX processing connect only when an application reads from it.
 - Optional processed self-hearing routed to a selected PipeWire output; enabling it intentionally keeps microphone capture and AFX processing active. Headphones are recommended to avoid feedback.
-- Camera and microphone selection in the GUI; an empty audio input follows the PipeWire system default.
+- Camera, microphone, and self-hearing output selection in the GUI; an empty audio device selection follows the corresponding PipeWire system default.
 
 ## Dependencies
 
@@ -50,7 +52,6 @@ Runtime:
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - Cam Link or another V4L2 input that can provide `NV12 1920x1080 @ 50fps`.
 - NVIDIA GPU/driver stack compatible with NVIDIA Maxine.
-- NVIDIA NGC CLI installed and authenticated with `ngc config set` for SDK Core download.
 - NVIDIA NGC CLI authenticated with `ngc config set`, or an API key exported as `NGC_API_KEY`/`NGC_CLI_API_KEY`.
 - NVIDIA Maxine Video Effects SDK Core installed under `/usr/local/VideoFX`.
 - PipeWire, PipeWire Pulse compatibility, and WirePlumber.
@@ -143,24 +144,30 @@ make install
 nv-x setup
 ```
 
-Run `nv-x setup` as your normal desktop user, not with `sudo`. Setup validates sudo once up front, then invokes `sudo` only for the root-scoped parts: extracting SDK Core into `/usr/local`, writing `/etc/modprobe.d/nv-x-v4l2loopback.conf`, and reloading `v4l2loopback`. The service is a systemd user service and must be installed for your desktop account.
+Run `nv-x setup` as your normal desktop user, not with `sudo`. Setup validates sudo once up front, then invokes `sudo` only for root-scoped SDK installation under `/usr/local`, the `/etc/modprobe.d/nv-x-v4l2loopback.conf` file, and the `v4l2loopback` reload. The service is a systemd user service and must be installed for your desktop account.
 
-`nv-x setup` creates the user config if missing, downloads and extracts the Maxine SDK Core tarball if `/usr/local/VideoFX` is not present, installs `nvvfxgreenscreen,nvvfxbackgroundblur`, writes and reloads the v4l2loopback config with sudo subcommands, installs/enables/starts the user service, and finishes with `fx doctor`.
+`nv-x setup` creates the user config if missing, provisions the VideoFX SDK and its GreenScreen/BackgroundBlur resources, provisions the Audio Effects SDK and the dereverb/denoiser and Studio Voice Low Latency models, writes and reloads the v4l2loopback config, installs/enables/starts the user service, and validates both runtimes with `fx doctor` and `audio doctor`.
 
 Useful partial setup flags:
 
 ```bash
 nv-x setup --dry-run
+nv-x setup --skip-config
 nv-x setup --skip-sdk
 nv-x setup --skip-maxine
+nv-x setup --skip-video
+nv-x setup --skip-audio
 nv-x setup --skip-loopback
+nv-x setup --skip-reload
 nv-x setup --skip-service
+nv-x setup --no-enable
+nv-x setup --no-start
 nv-x setup --force
 ```
 
 ## Config
 
-The default config rendered by `nv-x config show` is:
+The user config is stored at `~/.config/nv-x/config.toml`. `nv-x config show` renders the effective configuration; a new installation starts with:
 
 ```toml
 [camera]
@@ -191,12 +198,29 @@ model_dir = "/usr/local/VideoFX/lib/models"
 enable_os_release_shim = true
 blur_strength = 0.75
 
+[audio]
+mode = "off"
+input_node = ""
+monitor_enabled = false
+monitor_output_node = ""
+dereverb_denoiser_intensity = 0.90
+sdk_path = "/usr/local/AudioFX"
+output_node_name = "nv-x-microphone"
+output_description = "NV-X Microphone"
+
 [light]
 enabled = false
 address = ""
 brightness = 20
 temperature = 206
 timeout_ms = 1500
+
+[service]
+name = "nv-x.service"
+exec_path = "/usr/bin/nv-x"
+
+[ui]
+theme = "system"
 ```
 
 `nv-x loopback write` renders:
@@ -241,6 +265,26 @@ The normal service path runs the same native helper on demand. `nv-x run` watche
 
 On CachyOS/Arch, the Maxine SDK can reject the host OS during `NvVFX_Load()`. `nv-x` enables a narrow `LD_PRELOAD` shim by default for helper processes only; it redirects Maxine's `/etc/os-release` read to an Ubuntu-shaped temporary file and does not change the system file.
 
+## Audio Effects
+
+`[audio].mode` selects one mutually exclusive live audio effect:
+
+- `off`: keeps the virtual microphone and AudioFX processing disabled.
+- `dereverb_denoiser`: applies the combined 48 kHz dereverberation and background-noise removal model. `dereverb_denoiser_intensity` accepts `0.0-1.0` and defaults to `0.90`.
+- `studio_voice_low_latency`: applies the real-time Studio Voice model. The dereverb/denoiser intensity setting does not apply to this mode.
+
+When an effect is enabled, `nv-x-audio` registers the PipeWire source named by `output_node_name` (shown to applications using `output_description`). Leaving `input_node` empty follows the current PipeWire default microphone. The physical microphone and AudioFX model remain idle until an application actually reads from the virtual microphone.
+
+Setting `monitor_enabled = true` enables processed self-hearing. `monitor_output_node` selects its PipeWire playback device; an empty value follows the system default output. Self-hearing intentionally keeps microphone capture and AudioFX processing active even when no application is reading the virtual microphone. Use headphones to avoid acoustic feedback.
+
+Useful audio diagnostics:
+
+```bash
+nv-x audio list
+nv-x audio doctor
+pactl list short sources
+```
+
 ## Light Auto-Control
 
 `[light].enabled = true` lets the service turn an Elgato light on when an external app starts consuming `/dev/video10`, and turn it off when the stream returns to idle.
@@ -259,6 +303,7 @@ If `[light].address` is empty, `nv-x` tries to reuse the active IP from `~/.conf
 v4l2-ctl -d /dev/video0 --list-formats-ext
 nv-x loopback write --dry-run
 nv-x setup --dry-run
+nv-x audio doctor
 nv-x run
 ```
 
@@ -296,7 +341,7 @@ The Wails app lives in `app/`. It uses Svelte 5, Tailwind CSS 4, and shadcn-svel
 make dev
 ```
 
-`make dev` / `wails dev` starts the developer dashboard with detailed device, service, loopback, config, and FX diagnostics.
+`make dev` / `wails dev` starts the developer dashboard with detailed device, service, loopback, config, video-effect, and audio-effect diagnostics.
 
 Production builds use the slim user UI:
 
@@ -305,4 +350,4 @@ make build
 app/build/bin/nv-x-gui
 ```
 
-The installed desktop app from `make desktop` is launched as `nv-x-gui`. The user UI provides direct background mode selection, inline mode settings, a Settings page for theme and Elgato light auto-control, and debounced automatic config save/service restart.
+The installed desktop app from `make desktop` is launched as `nv-x-gui`. The user UI has separate Video and Audio tabs for device/effect selection, dereverb/denoiser intensity, and processed self-hearing. Its Settings page controls theme and Elgato light auto-control. Changes are saved to the user config and restart the background service automatically after a short debounce.
