@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/frontend/src/assets/images/logo-universal.png" alt="NV-X logo" width="240">
+</p>
+
 # nv-x
 
 > [!IMPORTANT]
