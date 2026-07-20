@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 func TestRenderSingleLoopbackDevice(t *testing.T) {
@@ -12,7 +12,7 @@ func TestRenderSingleLoopbackDevice(t *testing.T) {
 	for _, want := range []string{
 		`devices=1`,
 		`video_nr=10`,
-		`card_label="NV-vCam"`,
+		`card_label="NV-X Camera"`,
 		`exclusive_caps=1`,
 		`max_buffers=8`,
 	} {

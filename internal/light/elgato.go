@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 const defaultPort = "9123"

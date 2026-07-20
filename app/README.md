@@ -1,4 +1,4 @@
-# nv-vcam Desktop App
+# nv-x Desktop App
 
 This directory contains the Wails desktop app.
 
@@ -21,12 +21,13 @@ The current frontend baseline is Svelte 5, Tailwind CSS 4, and Vite. It has a `$
 - shadcn-svelte components by default.
 - Do not hand-make components when a shadcn-svelte equivalent exists.
 
-Current first GUI surface:
+Current GUI surface:
 
 - detected input and output devices
 - service status and start/stop/restart controls
 - loopback config status and reload/write controls
 - config display and edit controls
-- future blur strength setting
+- mutually exclusive NVIDIA video effects and camera selection
+- mutually exclusive NVIDIA audio effects and PipeWire source selection
 - background image replacement setting
 - service logs/status view

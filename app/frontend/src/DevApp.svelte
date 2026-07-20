@@ -154,7 +154,7 @@
   <div class="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-6 py-6">
     <header class="flex flex-col gap-4 border-b pb-5 md:flex-row md:items-end md:justify-between">
       <div class="space-y-1">
-        <p class="text-sm font-medium text-muted-foreground">nv-vcam</p>
+        <p class="text-sm font-medium text-muted-foreground">nv-x</p>
         <h1 class="text-3xl font-semibold tracking-normal">Virtual camera manager</h1>
         <p class="max-w-2xl text-sm text-muted-foreground">
           Manage device discovery, config generation, loopback setup, and the user service.
@@ -183,8 +183,8 @@
       {#each [
         ['v4l2loopback', boolText(status?.v4l2LoopbackLoaded), status?.v4l2LoopbackLoaded],
         ['Cam Link input', status?.expectedInput ?? '/dev/video0', status?.expectedInputExists],
-        ['NV-vCam output', status?.fx?.state ?? 'unknown', status?.fx?.state === 'idle' || status?.fx?.state === 'active'],
-        ['Service', status?.service.name ?? 'nv-vcam.service', status?.service.active]
+        ['NV-X output', status?.fx?.state ?? 'unknown', status?.fx?.state === 'idle' || status?.fx?.state === 'active'],
+        ['Service', status?.service.name ?? 'nv-x.service', status?.service.active]
       ] as [title, value, ok]}
         <Card>
           <CardHeader class="gap-2">
@@ -303,7 +303,7 @@
                   <div class="rounded-lg border bg-muted/20 p-3">
                     <div class="mb-2 flex items-center justify-between gap-3">
                       <p class="truncate text-sm font-medium">{file.Path}</p>
-                      <Badge variant={file.IsNV ? 'default' : 'secondary'}>{file.IsNV ? 'nv-vcam' : 'external'}</Badge>
+                      <Badge variant={file.IsNV ? 'default' : 'secondary'}>{file.IsNV ? 'nv-x' : 'external'}</Badge>
                     </div>
                     <pre class="overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">{file.Content}</pre>
                   </div>
@@ -313,7 +313,7 @@
               {/if}
               <Separator />
               <div>
-                <p class="mb-2 text-sm font-medium">Generated nv-vcam config</p>
+                <p class="mb-2 text-sm font-medium">Generated nv-x config</p>
                 <pre class="overflow-x-auto rounded-lg border bg-muted/20 p-3 text-xs">{loopbackView?.rendered}</pre>
               </div>
             </CardContent>

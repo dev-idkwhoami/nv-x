@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 const fakeOSRelease = `NAME="Ubuntu"
@@ -173,7 +173,7 @@ func RunTestImage(cfg config.Config, opts TestImageOptions) (TestImageResult, er
 	if width < 512 || height < 288 {
 		return TestImageResult{}, fmt.Errorf("Maxine test image must be at least 512x288, got %dx%d", width, height)
 	}
-	dir, err := os.MkdirTemp("", "nv-vcam-fx-*")
+	dir, err := os.MkdirTemp("", "nv-x-fx-*")
 	if err != nil {
 		return TestImageResult{}, err
 	}
@@ -275,10 +275,10 @@ func maxineEnv(cfg config.Config) ([]string, DoctorResult) {
 	env := os.Environ()
 	env = upsertEnv(env, "LD_LIBRARY_PATH", strings.Join(append(libPaths, envValue("LD_LIBRARY_PATH")...), string(os.PathListSeparator)))
 	if needsShim && shimPath != "" {
-		fakePath := filepath.Join(os.TempDir(), "nv-vcam-fake-os-release")
+		fakePath := filepath.Join(os.TempDir(), "nv-x-fake-os-release")
 		_ = os.WriteFile(fakePath, []byte(fakeOSRelease), 0o644)
 		env = upsertEnv(env, "LD_PRELOAD", shimPath)
-		env = upsertEnv(env, "NV_VCAM_FAKE_OS_RELEASE", fakePath)
+		env = upsertEnv(env, "NV_X_FAKE_OS_RELEASE", fakePath)
 	}
 
 	missing := missingMaxineFiles(sdkPath, modelDir)
@@ -363,39 +363,39 @@ func MissingSharedLibraries(path string, env []string) []string {
 }
 
 func findHelper() string {
-	if path := os.Getenv("NV_VCAM_MAXINE_HELPER"); path != "" {
+	if path := os.Getenv("NV_X_VIDEO_HELPER"); path != "" {
 		return pathIfExists(path)
 	}
 	if exe, err := os.Executable(); err == nil {
-		if path := pathIfExists(filepath.Join(filepath.Dir(exe), "nv-vcam-maxine-helper")); path != "" {
+		if path := pathIfExists(filepath.Join(filepath.Dir(exe), "nv-x-video")); path != "" {
 			return path
 		}
 	}
-	if path, err := exec.LookPath("nv-vcam-maxine-helper"); err == nil {
+	if path, err := exec.LookPath("nv-x-video"); err == nil {
 		return path
 	}
-	if path := pathIfExists("bin/nv-vcam-maxine-helper"); path != "" {
+	if path := pathIfExists("bin/nv-x-video"); path != "" {
 		return path
 	}
 	return ""
 }
 
 func findShim() string {
-	if path := os.Getenv("NV_VCAM_MAXINE_OS_RELEASE_SHIM"); path != "" {
+	if path := os.Getenv("NV_X_MAXINE_OS_RELEASE_SHIM"); path != "" {
 		return pathIfExists(path)
 	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		for _, path := range []string{
-			filepath.Join(dir, "nv-vcam-os-release-shim.so"),
-			filepath.Join(filepath.Dir(dir), "lib", "nv-vcam", "nv-vcam-os-release-shim.so"),
+			filepath.Join(dir, "nv-x-os-release-shim.so"),
+			filepath.Join(filepath.Dir(dir), "lib", "nv-x", "nv-x-os-release-shim.so"),
 		} {
 			if found := pathIfExists(path); found != "" {
 				return found
 			}
 		}
 	}
-	for _, path := range []string{"bin/nv-vcam-os-release-shim.so", filepath.Join(os.Getenv("HOME"), ".local", "lib", "nv-vcam", "nv-vcam-os-release-shim.so")} {
+	for _, path := range []string{"bin/nv-x-os-release-shim.so", filepath.Join(os.Getenv("HOME"), ".local", "lib", "nv-x", "nv-x-os-release-shim.so")} {
 		if found := pathIfExists(path); found != "" {
 			return found
 		}

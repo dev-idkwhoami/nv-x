@@ -15,9 +15,19 @@ type Config struct {
 	Output   OutputConfig
 	Loopback LoopbackConfig
 	FX       FXConfig
+	Audio    AudioConfig
 	Light    LightConfig
 	Service  ServiceConfig
 	UI       UIConfig
+}
+
+type AudioConfig struct {
+	Mode                      string
+	InputNode                 string
+	DereverbDenoiserIntensity float64
+	SDKPath                   string
+	OutputNodeName            string
+	OutputDescription         string
 }
 
 type CameraConfig struct {
@@ -81,11 +91,11 @@ func Default() Config {
 		Output: OutputConfig{
 			Device:       "/dev/video10",
 			VideoNR:      10,
-			Label:        "NV-vCam",
+			Label:        "NV-X Camera",
 			OutputFormat: "yuv420p",
 		},
 		Loopback: LoopbackConfig{
-			ConfigPath:    "/etc/modprobe.d/nv-vcam-v4l2loopback.conf",
+			ConfigPath:    "/etc/modprobe.d/nv-x-v4l2loopback.conf",
 			ExclusiveCaps: true,
 			MaxBuffers:    8,
 		},
@@ -99,6 +109,14 @@ func Default() Config {
 			EnableOSReleaseShim: true,
 			BlurStrength:        0.75,
 		},
+		Audio: AudioConfig{
+			Mode:                      "off",
+			InputNode:                 "",
+			DereverbDenoiserIntensity: 0.90,
+			SDKPath:                   "/usr/local/AudioFX",
+			OutputNodeName:            "nv-x-microphone",
+			OutputDescription:         "NV-X Microphone",
+		},
 		Light: LightConfig{
 			Enabled:     false,
 			Address:     "",
@@ -107,8 +125,8 @@ func Default() Config {
 			TimeoutMS:   1500,
 		},
 		Service: ServiceConfig{
-			Name:     "nv-vcam.service",
-			ExecPath: "~/.local/bin/nv-vcam",
+			Name:     "nv-x.service",
+			ExecPath: "/usr/bin/nv-x",
 		},
 		UI: UIConfig{
 			Theme: "system",
@@ -117,7 +135,7 @@ func Default() Config {
 }
 
 func DefaultPath() (string, error) {
-	return ExpandPath("~/.config/nv-vcam/config.toml")
+	return ExpandPath("~/.config/nv-x/config.toml")
 }
 
 func ExpandPath(path string) (string, error) {
@@ -179,6 +197,13 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "model_dir = %q\n", c.FX.ModelDir)
 	fmt.Fprintf(&b, "enable_os_release_shim = %t\n", c.FX.EnableOSReleaseShim)
 	fmt.Fprintf(&b, "blur_strength = %.2f\n\n", c.FX.BlurStrength)
+	fmt.Fprintf(&b, "[audio]\n")
+	fmt.Fprintf(&b, "mode = %q\n", c.Audio.Mode)
+	fmt.Fprintf(&b, "input_node = %q\n", c.Audio.InputNode)
+	fmt.Fprintf(&b, "dereverb_denoiser_intensity = %.2f\n", c.Audio.DereverbDenoiserIntensity)
+	fmt.Fprintf(&b, "sdk_path = %q\n", c.Audio.SDKPath)
+	fmt.Fprintf(&b, "output_node_name = %q\n", c.Audio.OutputNodeName)
+	fmt.Fprintf(&b, "output_description = %q\n\n", c.Audio.OutputDescription)
 	fmt.Fprintf(&b, "[light]\n")
 	fmt.Fprintf(&b, "enabled = %t\n", c.Light.Enabled)
 	fmt.Fprintf(&b, "address = %q\n", c.Light.Address)
@@ -330,6 +355,42 @@ func assign(cfg *Config, section, key, raw string) error {
 		v, err := strconv.ParseFloat(raw, 64)
 		cfg.FX.BlurStrength = v
 		return err
+	case "audio.mode":
+		v, err := parseString(raw)
+		if err != nil {
+			return err
+		}
+		if err := ValidateAudioMode(v); err != nil {
+			return err
+		}
+		cfg.Audio.Mode = v
+		return nil
+	case "audio.input_node":
+		v, err := parseString(raw)
+		cfg.Audio.InputNode = v
+		return err
+	case "audio.dereverb_denoiser_intensity":
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return err
+		}
+		if err := ValidateAudioIntensity(v); err != nil {
+			return err
+		}
+		cfg.Audio.DereverbDenoiserIntensity = v
+		return nil
+	case "audio.sdk_path":
+		v, err := parseString(raw)
+		cfg.Audio.SDKPath = v
+		return err
+	case "audio.output_node_name":
+		v, err := parseString(raw)
+		cfg.Audio.OutputNodeName = v
+		return err
+	case "audio.output_description":
+		v, err := parseString(raw)
+		cfg.Audio.OutputDescription = v
+		return err
 	case "light.enabled":
 		v, err := strconv.ParseBool(raw)
 		cfg.Light.Enabled = v
@@ -389,6 +450,22 @@ func assign(cfg *Config, section, key, raw string) error {
 	default:
 		return fmt.Errorf("unknown key %q in section %q", key, section)
 	}
+}
+
+func ValidateAudioMode(mode string) error {
+	switch mode {
+	case "off", "dereverb_denoiser", "studio_voice_low_latency":
+		return nil
+	default:
+		return fmt.Errorf("invalid audio mode %q: expected off, dereverb_denoiser, or studio_voice_low_latency", mode)
+	}
+}
+
+func ValidateAudioIntensity(value float64) error {
+	if value < 0 || value > 1 {
+		return fmt.Errorf("invalid dereverb_denoiser_intensity %.2f: expected 0-1", value)
+	}
+	return nil
 }
 
 func ValidateLightBrightness(value int) error {

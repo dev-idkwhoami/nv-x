@@ -9,11 +9,11 @@
 
 static const char *redirect_path(const char *path) {
   if (path && strcmp(path, "/etc/os-release") == 0) {
-    const char *override = getenv("NV_VCAM_FAKE_OS_RELEASE");
+    const char *override = getenv("NV_X_FAKE_OS_RELEASE");
     if (override && override[0] != '\0') {
       return override;
     }
-    return "/tmp/nv-vcam-fake-os-release";
+    return "/tmp/nv-x-fake-os-release";
   }
   return path;
 }

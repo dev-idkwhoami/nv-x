@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"nv-vcam/internal/capture"
-	"nv-vcam/internal/config"
-	"nv-vcam/internal/light"
+	"nv-x/internal/capture"
+	"nv-x/internal/config"
+	"nv-x/internal/light"
 )
 
 type State string
@@ -205,10 +205,10 @@ func MissingDependencies(cfg config.Config) []string {
 	var missing []string
 	_, result := maxineEnv(cfg)
 	if result.HelperPath == "" {
-		missing = append(missing, "nv-vcam-maxine-helper")
+		missing = append(missing, "nv-x-video")
 	}
 	if result.OSReleaseShim && result.ShimPath == "" {
-		missing = append(missing, "nv-vcam-os-release-shim.so")
+		missing = append(missing, "nv-x-os-release-shim.so")
 	}
 	return missing
 }
@@ -218,7 +218,7 @@ func DefaultStatePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "state", "nv-vcam", "fx.json"), nil
+	return filepath.Join(home, ".local", "state", "nv-x", "fx.json"), nil
 }
 
 func ReadState(path string) (Snapshot, bool) {
@@ -479,7 +479,7 @@ func IdleOutputHelperArgs(result DoctorResult, opts StreamOptions) []string {
 		"--width", strconv.Itoa(opts.Width),
 		"--height", strconv.Itoa(opts.Height),
 		"--fps", strconv.Itoa(opts.FPS),
-		"--idle-label", "NV-vCam idling ...",
+		"--idle-label", "NV-X idling ...",
 	}
 }
 
@@ -492,7 +492,7 @@ func prepareReplacementPPM(opts StreamOptions) (string, func(), error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("load replacement image: %w", err)
 	}
-	dir, err := os.MkdirTemp("", "nv-vcam-bg-*")
+	dir, err := os.MkdirTemp("", "nv-x-bg-*")
 	if err != nil {
 		return "", nil, err
 	}

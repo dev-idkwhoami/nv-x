@@ -2,7 +2,7 @@
   import DevApp from './DevApp.svelte'
   import UserApp from './UserApp.svelte'
 
-  const appMode = import.meta.env.VITE_NV_VCAM_APP_MODE === 'dev' ? 'dev' : 'user'
+  const appMode = import.meta.env.VITE_NV_X_APP_MODE === 'dev' ? 'dev' : 'user'
 </script>
 
 {#if appMode === 'dev'}

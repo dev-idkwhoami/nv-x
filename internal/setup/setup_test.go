@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 func TestEnsureSDKDryRunPlansBuiltInNGCDownload(t *testing.T) {
@@ -24,7 +24,7 @@ func TestRunAsRootRequiresSkippingService(t *testing.T) {
 		t.Skip("root guard only applies under root")
 	}
 	err := Run(context.Background(), config.Default(), Options{})
-	if err == nil || !strings.Contains(err.Error(), "do not run nv-vcam setup with sudo") {
+	if err == nil || !strings.Contains(err.Error(), "do not run nv-x setup with sudo") {
 		t.Fatalf("expected root guard error, got %v", err)
 	}
 }
@@ -36,7 +36,7 @@ func TestNeedsSudoForPrivilegedSetupSteps(t *testing.T) {
 	if !needsSudo(Options{}) {
 		t.Fatal("default setup should validate sudo")
 	}
-	if needsSudo(Options{SkipSDK: true, SkipMaxine: true, SkipLoopback: true}) {
+	if needsSudo(Options{SkipSDK: true, SkipMaxine: true, SkipLoopback: true, SkipAudio: true}) {
 		t.Fatal("setup without privileged steps should not validate sudo")
 	}
 }
@@ -68,8 +68,31 @@ func TestRunStreamingReturnsCommandErrors(t *testing.T) {
 }
 
 func TestIsServiceNotLoaded(t *testing.T) {
-	err := errors.New("systemctl --user stop nv-vcam.service failed: exit status 5\nFailed to stop nv-vcam.service: Unit nv-vcam.service not loaded.")
+	err := errors.New("systemctl --user stop nv-x.service failed: exit status 5\nFailed to stop nv-x.service: Unit nv-x.service not loaded.")
 	if !isServiceNotLoaded(err) {
 		t.Fatal("expected not-loaded systemd error to be recognized")
+	}
+}
+
+func TestReadNGCAPIKey(t *testing.T) {
+	key, err := readNGCAPIKey(strings.NewReader("org = nvidia\napikey = nvapi-test-key\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "nvapi-test-key" {
+		t.Fatalf("expected configured API key, got %q", key)
+	}
+}
+
+func TestPatchAFXDownloaderUsesUniqueTemporaryFilesAndFailsFast(t *testing.T) {
+	input := "#!/bin/bash\nlocal TEMP_FILE=/tmp/temp_list\nlocal TEMP_TAR_FILE=/tmp/temp_lib.tar.gz\n"
+	patched, err := patchAFXDownloader(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"set -e", "mktemp /tmp/nv-x-afx-list.", "mktemp /tmp/nv-x-afx-lib."} {
+		if !strings.Contains(patched, expected) {
+			t.Fatalf("expected patched downloader to contain %q", expected)
+		}
 	}
 }

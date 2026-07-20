@@ -1,5 +1,76 @@
+export namespace audio {
+
+	export class Snapshot {
+	    state: string;
+	    mode: string;
+	    inputNode: string;
+	    resolvedInput: string;
+	    outputNode: string;
+	    message: string;
+	    restarts: number;
+	    updatedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Snapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.mode = source["mode"];
+	        this.inputNode = source["inputNode"];
+	        this.resolvedInput = source["resolvedInput"];
+	        this.outputNode = source["outputNode"];
+	        this.message = source["message"];
+	        this.restarts = source["restarts"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class Source {
+	    nodeName: string;
+	    description: string;
+	    default: boolean;
+	    available: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new Source(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nodeName = source["nodeName"];
+	        this.description = source["description"];
+	        this.default = source["default"];
+	        this.available = source["available"];
+	    }
+	}
+
+}
+
 export namespace config {
 
+	export class AudioConfig {
+	    Mode: string;
+	    InputNode: string;
+	    DereverbDenoiserIntensity: number;
+	    SDKPath: string;
+	    OutputNodeName: string;
+	    OutputDescription: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AudioConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Mode = source["Mode"];
+	        this.InputNode = source["InputNode"];
+	        this.DereverbDenoiserIntensity = source["DereverbDenoiserIntensity"];
+	        this.SDKPath = source["SDKPath"];
+	        this.OutputNodeName = source["OutputNodeName"];
+	        this.OutputDescription = source["OutputDescription"];
+	    }
+	}
 	export class CameraConfig {
 	    InputDevice: string;
 	    InputFormat: string;
@@ -131,6 +202,7 @@ export namespace config {
 	    Output: OutputConfig;
 	    Loopback: LoopbackConfig;
 	    FX: FXConfig;
+	    Audio: AudioConfig;
 	    Light: LightConfig;
 	    Service: ServiceConfig;
 	    UI: UIConfig;
@@ -145,6 +217,7 @@ export namespace config {
 	        this.Output = this.convertValues(source["Output"], OutputConfig);
 	        this.Loopback = this.convertValues(source["Loopback"], LoopbackConfig);
 	        this.FX = this.convertValues(source["FX"], FXConfig);
+	        this.Audio = this.convertValues(source["Audio"], AudioConfig);
 	        this.Light = this.convertValues(source["Light"], LightConfig);
 	        this.Service = this.convertValues(source["Service"], ServiceConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
@@ -181,7 +254,9 @@ export namespace devices {
 	export class Device {
 	    SysName: string;
 	    Path: string;
+	    StablePath: string;
 	    Name: string;
+	    Capture: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new Device(source);
@@ -191,7 +266,9 @@ export namespace devices {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SysName = source["SysName"];
 	        this.Path = source["Path"];
+	        this.StablePath = source["StablePath"];
 	        this.Name = source["Name"];
+	        this.Capture = source["Capture"];
 	    }
 	}
 
@@ -295,6 +372,8 @@ export namespace main {
 	    expectedOutputExists: boolean;
 	    configRendered: string;
 	    fx: fx.Snapshot;
+	    audio: audio.Snapshot;
+	    audioSources: audio.Source[];
 
 	    static createFrom(source: any = {}) {
 	        return new AppStatus(source);
@@ -313,6 +392,8 @@ export namespace main {
 	        this.expectedOutputExists = source["expectedOutputExists"];
 	        this.configRendered = source["configRendered"];
 	        this.fx = this.convertValues(source["fx"], fx.Snapshot);
+	        this.audio = this.convertValues(source["audio"], audio.Snapshot);
+	        this.audioSources = this.convertValues(source["audioSources"], audio.Source);
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -421,7 +502,11 @@ export namespace main {
 	    }
 	}
 	export class UserSettings {
+	    cameraInput: string;
 	    mode: string;
+	    audioMode: string;
+	    audioInputNode: string;
+	    audioIntensity: number;
 	    lightEnabled: boolean;
 	    lightAddress: string;
 	    lightBrightness: number;
@@ -437,7 +522,11 @@ export namespace main {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cameraInput = source["cameraInput"];
 	        this.mode = source["mode"];
+	        this.audioMode = source["audioMode"];
+	        this.audioInputNode = source["audioInputNode"];
+	        this.audioIntensity = source["audioIntensity"];
 	        this.lightEnabled = source["lightEnabled"];
 	        this.lightAddress = source["lightAddress"];
 	        this.lightBrightness = source["lightBrightness"];

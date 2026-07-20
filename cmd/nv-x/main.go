@@ -12,13 +12,14 @@ import (
 	"syscall"
 	"time"
 
-	"nv-vcam/internal/config"
-	"nv-vcam/internal/devices"
-	"nv-vcam/internal/fx"
-	"nv-vcam/internal/loopback"
-	"nv-vcam/internal/runner"
-	svc "nv-vcam/internal/service"
-	"nv-vcam/internal/setup"
+	"nv-x/internal/audio"
+	"nv-x/internal/config"
+	"nv-x/internal/devices"
+	"nv-x/internal/fx"
+	"nv-x/internal/loopback"
+	"nv-x/internal/runner"
+	svc "nv-x/internal/service"
+	"nv-x/internal/setup"
 )
 
 func main() {
@@ -49,6 +50,8 @@ func run(args []string) error {
 		return serviceCmd(ctx, args[2:])
 	case "fx":
 		return fxCmd(args[2:])
+	case "audio":
+		return audioCmd(ctx, args[2:])
 	case "setup":
 		setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer setupCancel()
@@ -66,21 +69,23 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Println(`usage:
-  nv-vcam status
-  nv-vcam list
-  nv-vcam config show
-  nv-vcam config write [--force] [--dry-run]
-  nv-vcam loopback show
-  nv-vcam loopback write [--force] [--dry-run]
-  nv-vcam loopback reload [--dry-run]
-  nv-vcam service install [--force] [--dry-run] [--enable] [--start]
-  nv-vcam service start|stop|restart|status [--dry-run]
-  nv-vcam fx doctor
-  nv-vcam fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
-  nv-vcam fx stream [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
-  nv-vcam fx transfer [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50]
-  nv-vcam setup [--force] [--dry-run] [--skip-sdk] [--skip-maxine] [--skip-loopback] [--skip-service]
-  nv-vcam run`)
+  nv-x status
+  nv-x list
+  nv-x config show
+  nv-x config write [--force] [--dry-run]
+  nv-x loopback show
+  nv-x loopback write [--force] [--dry-run]
+  nv-x loopback reload [--dry-run]
+  nv-x service install [--force] [--dry-run] [--enable] [--start]
+  nv-x service start|stop|restart|status [--dry-run]
+  nv-x fx doctor
+	 nv-x audio list
+	 nv-x audio doctor
+  nv-x fx test-image --input path --blur-output path --removed-output path [--mask path] [--final-output path] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
+  nv-x fx stream [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50] [--background blur|mask|replace|chroma] [--background-image path] [--chroma-color #00ff00] [--blur-strength value]
+  nv-x fx transfer [--input /dev/video0] [--output /dev/video10] [--width 1920] [--height 1080] [--fps 50]
+  nv-x setup [--force] [--dry-run] [--skip-video] [--skip-audio] [--skip-loopback] [--skip-service]
+  nv-x run`)
 }
 
 func fxCmd(args []string) error {
@@ -224,6 +229,44 @@ func fxCmd(args []string) error {
 	}
 }
 
+func audioCmd(ctx context.Context, args []string) error {
+	if len(args) < 1 {
+		return errors.New("audio requires list or doctor")
+	}
+	cfg := loadEffectiveConfig()
+	switch args[0] {
+	case "list":
+		sources, err := audio.ListSources(ctx, cfg.Audio.OutputNodeName)
+		if err != nil {
+			return err
+		}
+		for _, source := range sources {
+			marker := ""
+			if source.Default {
+				marker = " (default)"
+			}
+			fmt.Printf("%s\t%s%s\n", source.NodeName, source.Description, marker)
+		}
+		return nil
+	case "doctor":
+		result := audio.Doctor(cfg)
+		fmt.Printf("audio doctor\nsdk_path: %s\nhelper: %s\n", result.SDKPath, result.HelperPath)
+		for _, model := range result.Models {
+			fmt.Printf("model: %s\n", model)
+		}
+		fmt.Printf("message: %s\n", result.Message)
+		if result.HelperOutput != "" {
+			fmt.Print(result.HelperOutput)
+		}
+		if !result.HelperOK {
+			return errors.New("Maxine AFX runtime check failed")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown audio command %q", args[0])
+	}
+}
+
 func configCmd(args []string) error {
 	if len(args) < 1 {
 		return errors.New("config requires show or write")
@@ -302,11 +345,11 @@ func loopbackShow(cfg config.Config) error {
 		fmt.Println("no v4l2loopback config files found in /etc/modprobe.d")
 		return nil
 	}
-	fmt.Printf("nv-vcam config path: %s\n", cfg.Loopback.ConfigPath)
+	fmt.Printf("nv-x config path: %s\n", cfg.Loopback.ConfigPath)
 	for _, item := range found {
 		marker := ""
 		if item.IsNV {
-			marker = " (nv-vcam)"
+			marker = " (nv-x)"
 		}
 		fmt.Printf("\n== %s%s ==\n%s", item.Path, marker, item.Content)
 		if !strings.HasSuffix(item.Content, "\n") {
@@ -384,6 +427,8 @@ func setupCmd(ctx context.Context, args []string) error {
 	skipLoopback := fs.Bool("skip-loopback", false, "skip loopback config and reload")
 	skipReload := fs.Bool("skip-reload", false, "skip v4l2loopback reload")
 	skipService := fs.Bool("skip-service", false, "skip user service install")
+	skipVideo := fs.Bool("skip-video", false, "skip video SDK, features, doctor, and loopback setup")
+	skipAudio := fs.Bool("skip-audio", false, "skip audio SDK, features, and doctor")
 	noEnable := fs.Bool("no-enable", false, "do not enable the user service")
 	noStart := fs.Bool("no-start", false, "do not start the user service")
 	features := fs.String("features", "nvvfxgreenscreen,nvvfxbackgroundblur", "comma-separated Maxine features to install")
@@ -404,6 +449,8 @@ func setupCmd(ctx context.Context, args []string) error {
 		SkipLoopback: *skipLoopback,
 		SkipReload:   *skipReload,
 		SkipService:  *skipService,
+		SkipVideo:    *skipVideo,
+		SkipAudio:    *skipAudio,
 		Enable:       !*noEnable,
 		Start:        !*noStart,
 		Features:     *features,
@@ -439,11 +486,11 @@ func status(ctx context.Context) error {
 	fmt.Printf("\nv4l2loopback loaded: %t\n", loopback.ModuleLoaded())
 
 	if _, err := os.Stat(cfg.Loopback.ConfigPath); err == nil {
-		fmt.Printf("nv-vcam loopback config: exists (%s)\n", cfg.Loopback.ConfigPath)
+		fmt.Printf("nv-x loopback config: exists (%s)\n", cfg.Loopback.ConfigPath)
 	} else if os.IsNotExist(err) {
-		fmt.Printf("nv-vcam loopback config: missing (%s)\n", cfg.Loopback.ConfigPath)
+		fmt.Printf("nv-x loopback config: missing (%s)\n", cfg.Loopback.ConfigPath)
 	} else {
-		fmt.Printf("nv-vcam loopback config: error: %v\n", err)
+		fmt.Printf("nv-x loopback config: error: %v\n", err)
 	}
 
 	manager := svc.New(cfg.Service.Name)
@@ -477,6 +524,19 @@ func status(ctx context.Context) error {
 			fmt.Printf("fx state: %s (%s), consumers=%d, updated=%s\n", snap.State, snap.Message, snap.Consumers, snap.UpdatedAt)
 		} else {
 			fmt.Printf("fx state: unavailable (%s missing or unreadable)\n", statePath)
+		}
+	}
+	fmt.Printf("audio mode: %s\n", cfg.Audio.Mode)
+	if cfg.Audio.InputNode == "" {
+		fmt.Println("audio input: system default")
+	} else {
+		fmt.Printf("audio input: %s\n", cfg.Audio.InputNode)
+	}
+	if statePath, err := audio.DefaultStatePath(); err == nil {
+		if snap, ok := audio.ReadState(statePath); ok {
+			fmt.Printf("audio state: %s (%s), updated=%s\n", snap.State, snap.Message, snap.UpdatedAt)
+		} else {
+			fmt.Printf("audio state: unavailable (%s missing or unreadable)\n", statePath)
 		}
 	}
 	return nil

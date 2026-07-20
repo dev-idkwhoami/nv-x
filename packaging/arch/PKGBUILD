@@ -1,16 +1,22 @@
 # Maintainer: Maximilian Oswald <maxi.osw@outlook.com>
-pkgname=nv-vcam
+pkgname=nv-x
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Native NVIDIA Maxine virtual camera pipeline"
+pkgdesc="Native NVIDIA Maxine video and audio effects service"
 arch=('x86_64')
-url="https://github.com/idkwhoami/nv-vcam"
+url="https://github.com/dev-idkwhoami/nv-x"
 license=('custom')
 depends=(
   'gtk3'
   'webkit2gtk-4.1'
   'v4l2loopback-dkms'
+  'pipewire'
+  'pipewire-pulse'
+  'wireplumber'
 )
+provides=('nv-x')
+conflicts=('nv-vcam')
+replaces=('nv-vcam')
 makedepends=(
   'bun'
   'go'
@@ -31,11 +37,12 @@ build() {
 package() {
   cd "$_repo_root"
 
-  install -Dm0755 bin/nv-vcam "$pkgdir/usr/bin/nv-vcam"
-  install -Dm0755 bin/nv-vcam-maxine-helper "$pkgdir/usr/bin/nv-vcam-maxine-helper"
-  install -Dm0755 app/build/bin/nv-vcam-gui "$pkgdir/usr/bin/nv-vcam-gui"
-  install -Dm0755 bin/nv-vcam-os-release-shim.so "$pkgdir/usr/lib/nv-vcam/nv-vcam-os-release-shim.so"
+  install -Dm0755 bin/nv-x "$pkgdir/usr/bin/nv-x"
+  install -Dm0755 bin/nv-x-video "$pkgdir/usr/bin/nv-x-video"
+  install -Dm0755 bin/nv-x-audio "$pkgdir/usr/bin/nv-x-audio"
+  install -Dm0755 app/build/bin/nv-x-gui "$pkgdir/usr/bin/nv-x-gui"
+  install -Dm0755 bin/nv-x-os-release-shim.so "$pkgdir/usr/lib/nv-x/nv-x-os-release-shim.so"
 
-  install -Dm0644 app/build/linux/nv-vcam-gui.desktop "$pkgdir/usr/share/applications/nv-vcam-gui.desktop"
-  install -Dm0644 app/build/linux-icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/nv-vcam-gui.png"
+  install -Dm0644 app/build/linux/nv-x-gui.desktop "$pkgdir/usr/share/applications/nv-x-gui.desktop"
+  install -Dm0644 app/build/linux-icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/nv-x-gui.png"
 }

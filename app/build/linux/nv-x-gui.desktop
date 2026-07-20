@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=NV-X
+Comment=NVIDIA video and audio effects controller
+Exec=nv-x-gui
+TryExec=nv-x-gui
+Icon=nv-x-gui
+Terminal=false
+Categories=AudioVideo;Audio;Video;
+StartupWMClass=nv-x-gui

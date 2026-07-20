@@ -25,7 +25,7 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`height = 1080`,
 		`fps = 50`,
 		`device = "/dev/video10"`,
-		`label = "NV-vCam"`,
+		`label = "NV-X Camera"`,
 		`video_nr = 10`,
 		`output_format = "yuv420p"`,
 		`exclusive_caps = true`,
@@ -37,6 +37,13 @@ func TestRenderAndParseDefault(t *testing.T) {
 		`model_dir = "/usr/local/VideoFX/lib/models"`,
 		`enable_os_release_shim = true`,
 		`blur_strength = 0.75`,
+		`[audio]`,
+		`mode = "off"`,
+		`input_node = ""`,
+		`dereverb_denoiser_intensity = 0.90`,
+		`sdk_path = "/usr/local/AudioFX"`,
+		`output_node_name = "nv-x-microphone"`,
+		`output_description = "NV-X Microphone"`,
 		`[light]`,
 		`enabled = false`,
 		`address = ""`,
@@ -57,7 +64,7 @@ func TestRenderAndParseDefault(t *testing.T) {
 	if parsed.Camera.InputDevice != "/dev/video0" || parsed.Camera.InputFormat != "nv12" || parsed.Camera.Width != 1920 || parsed.Camera.Height != 1080 || parsed.Camera.FPS != 50 {
 		t.Fatalf("unexpected parsed config: %+v", parsed)
 	}
-	if parsed.Output.Device != "/dev/video10" || parsed.Output.VideoNR != 10 || parsed.Output.Label != "NV-vCam" || parsed.Output.OutputFormat != "yuv420p" {
+	if parsed.Output.Device != "/dev/video10" || parsed.Output.VideoNR != 10 || parsed.Output.Label != "NV-X Camera" || parsed.Output.OutputFormat != "yuv420p" {
 		t.Fatalf("unexpected parsed output config: %+v", parsed.Output)
 	}
 	if parsed.UI.Theme != "system" {
@@ -68,6 +75,26 @@ func TestRenderAndParseDefault(t *testing.T) {
 	}
 	if parsed.Light.Enabled || parsed.Light.Address != "" || parsed.Light.Brightness != 20 || parsed.Light.Temperature != 206 || parsed.Light.TimeoutMS != 1500 {
 		t.Fatalf("unexpected parsed light config: %+v", parsed.Light)
+	}
+	if parsed.Audio.Mode != "off" || parsed.Audio.InputNode != "" || parsed.Audio.DereverbDenoiserIntensity != 0.90 || parsed.Audio.SDKPath != "/usr/local/AudioFX" {
+		t.Fatalf("unexpected parsed audio config: %+v", parsed.Audio)
+	}
+}
+
+func TestValidateAudioConfig(t *testing.T) {
+	for _, mode := range []string{"off", "dereverb_denoiser", "studio_voice_low_latency"} {
+		if err := ValidateAudioMode(mode); err != nil {
+			t.Fatalf("expected %q to be valid: %v", mode, err)
+		}
+	}
+	if err := ValidateAudioMode("denoiser"); err == nil {
+		t.Fatal("expected invalid audio mode")
+	}
+	if err := ValidateAudioIntensity(0.9); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateAudioIntensity(1.1); err == nil {
+		t.Fatal("expected invalid audio intensity")
 	}
 }
 

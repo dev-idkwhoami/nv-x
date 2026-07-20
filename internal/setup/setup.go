@@ -1,21 +1,27 @@
 package setup
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"nv-vcam/internal/config"
-	"nv-vcam/internal/fx"
-	"nv-vcam/internal/loopback"
-	svc "nv-vcam/internal/service"
+	"golang.org/x/term"
+
+	"nv-x/internal/audio"
+	"nv-x/internal/config"
+	"nv-x/internal/fx"
+	"nv-x/internal/loopback"
+	svc "nv-x/internal/service"
 )
 
 const defaultSDKNGCResource = "nvidia/maxine/vfx_sdk_core:1.2.0.0_linux"
+const defaultAFXNGCResource = "nvidia/maxine/maxine_linux_audio_effects_sdk:2.1.0"
 
 type Options struct {
 	Force        bool
@@ -26,6 +32,8 @@ type Options struct {
 	SkipLoopback bool
 	SkipReload   bool
 	SkipService  bool
+	SkipVideo    bool
+	SkipAudio    bool
 	Enable       bool
 	Start        bool
 	Features     string
@@ -37,7 +45,7 @@ type Options struct {
 
 func Run(ctx context.Context, cfg config.Config, opts Options) error {
 	if os.Geteuid() == 0 && !opts.SkipService {
-		return fmt.Errorf("do not run nv-vcam setup with sudo; run it as your normal desktop user so the systemd user service is installed for the right account")
+		return fmt.Errorf("do not run nv-x setup with sudo; run it as your normal desktop user so the systemd user service is installed for the right account")
 	}
 	if opts.Features == "" {
 		opts.Features = "nvvfxgreenscreen,nvvfxbackgroundblur"
@@ -62,17 +70,28 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 			return fmt.Errorf("sudo authentication failed: %w", err)
 		}
 	}
-	if !opts.SkipSDK {
+	if err := cleanupLegacy(ctx, opts.DryRun); err != nil {
+		return fmt.Errorf("legacy nv-vcam cleanup failed: %w", err)
+	}
+	if !opts.SkipVideo && !opts.SkipSDK {
 		if err := ensureSDK(ctx, cfg, opts); err != nil {
 			return fmt.Errorf("Maxine SDK Core setup failed: %w", err)
 		}
 	}
-	if !opts.SkipMaxine {
+	if !opts.SkipVideo && !opts.SkipMaxine {
 		if err := ensureMaxine(ctx, cfg, opts); err != nil {
 			return fmt.Errorf("Maxine setup failed: %w", err)
 		}
 	}
-	if !opts.SkipLoopback {
+	if !opts.SkipAudio {
+		if err := ensureAFXSDK(ctx, cfg, opts); err != nil {
+			return fmt.Errorf("Maxine Audio Effects SDK setup failed: %w", err)
+		}
+		if err := ensureAFXFeatures(ctx, cfg, opts); err != nil {
+			return fmt.Errorf("Maxine audio feature setup failed: %w", err)
+		}
+	}
+	if !opts.SkipVideo && !opts.SkipLoopback {
 		if err := ensureLoopbackConfig(ctx, cfg, opts); err != nil {
 			return fmt.Errorf("loopback config setup failed: %w", err)
 		}
@@ -82,7 +101,7 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 			}
 		}
 	}
-	if !opts.SkipMaxine {
+	if !opts.SkipVideo && !opts.SkipMaxine {
 		result := fx.Doctor(cfg)
 		if opts.DryRun {
 			fmt.Printf("would run fx doctor: %s\n", result.Message)
@@ -91,6 +110,17 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 				return fmt.Errorf("Maxine FX runtime check failed")
 			}
 			fmt.Printf("ok: fx doctor passed: %s\n", result.Message)
+		}
+	}
+	if !opts.SkipAudio {
+		if opts.DryRun {
+			fmt.Println("would run audio doctor for dereverb/denoiser and Studio Voice Low Latency")
+		} else {
+			result := audio.Doctor(cfg)
+			if !result.HelperOK {
+				return fmt.Errorf("Maxine AFX runtime check failed: %s", result.Message)
+			}
+			fmt.Printf("ok: audio doctor passed: %s\n", result.Message)
 		}
 	}
 	if !opts.SkipService {
@@ -111,7 +141,43 @@ func needsSudo(opts Options) bool {
 	if os.Geteuid() == 0 {
 		return false
 	}
-	return !opts.SkipSDK || !opts.SkipMaxine || !opts.SkipLoopback
+	return (!opts.SkipVideo && (!opts.SkipSDK || !opts.SkipMaxine)) || !opts.SkipAudio || !opts.SkipLoopback
+}
+
+func cleanupLegacy(ctx context.Context, dryRun bool) error {
+	legacy := svc.New("nv-vcam.service")
+	_ = legacy.Stop(ctx, dryRun)
+	if dryRun {
+		fmt.Println("would disable and remove legacy nv-vcam installed artifacts (user config/state preserved)")
+	} else {
+		_ = legacy.Disable(ctx, false)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	paths := []string{
+		filepath.Join(home, ".config/systemd/user/nv-vcam.service"),
+		filepath.Join(home, ".local/bin/nv-vcam"),
+		filepath.Join(home, ".local/bin/nv-vcam-gui"),
+		filepath.Join(home, ".local/bin/nv-vcam-maxine-helper"),
+		filepath.Join(home, ".local/lib/nv-vcam/nv-vcam-os-release-shim.so"),
+		filepath.Join(home, ".local/share/applications/nv-vcam-gui.desktop"),
+		filepath.Join(home, ".local/share/icons/hicolor/256x256/apps/nv-vcam-gui.png"),
+	}
+	for _, path := range paths {
+		if dryRun {
+			fmt.Printf("would remove %s\n", path)
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := run(ctx, dryRun, "", "sudo", "rm", "-f", "/etc/modprobe.d/nv-vcam-v4l2loopback.conf"); err != nil {
+		return err
+	}
+	return legacy.DaemonReload(ctx, dryRun)
 }
 
 func validateSudo(ctx context.Context, dryRun bool) error {
@@ -184,7 +250,7 @@ func sdkDownloadDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cache, "nv-vcam", "ngc"), nil
+	return filepath.Join(cache, "nv-x", "ngc"), nil
 }
 
 func findSDKTarball(root string) (string, error) {
@@ -203,6 +269,286 @@ func findSDKTarball(root string) (string, error) {
 		return nil
 	})
 	return found, err
+}
+
+func ensureAFXSDK(ctx context.Context, cfg config.Config, opts Options) error {
+	root, err := config.ExpandPath(cfg.Audio.SDKPath)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(root, "nvafx", "include", "nvAudioEffects.h")); err == nil {
+		fmt.Printf("ok: Maxine Audio Effects SDK exists: %s\n", root)
+		return nil
+	}
+	tarball, err := downloadAFXSDK(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if err := run(ctx, opts.DryRun, "", "sudo", "mkdir", "-p", root); err != nil {
+		return err
+	}
+	if err := run(ctx, opts.DryRun, "", "sudo", "tar", "-xzf", tarball, "-C", root, "--strip-components=2"); err != nil {
+		return err
+	}
+	if !opts.DryRun {
+		fmt.Printf("ok: Maxine Audio Effects SDK extracted to %s\n", root)
+	}
+	return nil
+}
+
+func downloadAFXSDK(ctx context.Context, opts Options) (string, error) {
+	dir, err := sdkDownloadDir()
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(dir, "afx")
+	if opts.DryRun {
+		fmt.Printf("would run: ngc registry resource download-version %s in %s\n", defaultAFXNGCResource, dir)
+		return filepath.Join(dir, "NVIDIA_AFX_SDK_Linux_<version>.tar.gz"), nil
+	}
+	if cached, _ := findAFXTarball(dir); cached != "" {
+		return cached, nil
+	}
+	if _, err := exec.LookPath("ngc"); err != nil {
+		return "", fmt.Errorf("ngc CLI not found; install it and run ngc config set")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	if err := runStreaming(ctx, dir, "ngc", "registry", "resource", "download-version", defaultAFXNGCResource); err != nil {
+		return "", err
+	}
+	result, err := findAFXTarball(dir)
+	if err != nil {
+		return "", err
+	}
+	if result == "" {
+		return "", fmt.Errorf("NGC download completed but no NVIDIA_AFX_SDK_Linux_*.tar.gz was found under %s", dir)
+	}
+	return result, nil
+}
+
+func findAFXTarball(root string) (string, error) {
+	var found string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "NVIDIA_AFX_SDK_Linux_") && strings.HasSuffix(entry.Name(), ".tar.gz") {
+			found = path
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	return found, err
+}
+
+type afxFeature struct {
+	effect       string
+	directory    string
+	modelPattern string
+}
+
+func ensureAFXFeatures(ctx context.Context, cfg config.Config, opts Options) error {
+	root, _ := config.ExpandPath(cfg.Audio.SDKPath)
+	features := []afxFeature{
+		{
+			effect:       "dereverb_denoiser-48k",
+			directory:    "dereverb_denoiser",
+			modelPattern: "models/sm_*/dereverb_denoiser_48k_*.trtpkg",
+		},
+		{
+			effect:       "studio_voice-48k",
+			directory:    "studio_voice",
+			modelPattern: "models/sm_*/studio_voice_low_latency_48k_*.trtpkg",
+		},
+	}
+	missing := make([]afxFeature, 0, len(features))
+	for _, feature := range features {
+		matches, _ := filepath.Glob(filepath.Join(root, "features", feature.directory, feature.modelPattern))
+		if len(matches) != 1 {
+			missing = append(missing, feature)
+		}
+	}
+	if len(missing) == 0 {
+		fmt.Println("ok: Maxine audio features already installed")
+		return nil
+	}
+	script := filepath.Join(root, "features", "download_features.sh")
+	if _, err := os.Stat(script); err != nil && !opts.DryRun {
+		return fmt.Errorf("%s not found", script)
+	}
+	key, err := ngcAPIKey()
+	if err != nil && !opts.DryRun {
+		return err
+	}
+	if opts.DryRun {
+		for _, feature := range missing {
+			fmt.Printf("would install AFX feature: %s with auto-detected GPU architecture\n", feature.effect)
+		}
+		return nil
+	}
+	old, existed := os.LookupEnv("NGC_API_KEY")
+	if err := os.Setenv("NGC_API_KEY", key); err != nil {
+		return err
+	}
+	defer func() {
+		if existed {
+			_ = os.Setenv("NGC_API_KEY", old)
+		} else {
+			_ = os.Unsetenv("NGC_API_KEY")
+		}
+	}()
+	patchedScript, err := createPatchedAFXDownloader(script)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(patchedScript)
+
+	// NVIDIA's downloader uses shared, fixed /tmp files and does not reliably
+	// fail when a request does. Download each effect into an isolated staging
+	// directory using unique manifests, verify it, and only then install it.
+	for _, feature := range missing {
+		staging, err := os.MkdirTemp("", "nv-x-afx-feature-*")
+		if err != nil {
+			return err
+		}
+		args := []string{"--ngc-org", opts.NGCOrg, "--ngc-team", opts.NGCTeam, "--effects", feature.effect, "--output-dir", staging}
+		if err := runStreaming(ctx, filepath.Dir(script), patchedScript, args...); err != nil {
+			os.RemoveAll(staging)
+			return fmt.Errorf("download %s: %w", feature.effect, err)
+		}
+		source := filepath.Join(staging, feature.directory)
+		matches, _ := filepath.Glob(filepath.Join(source, feature.modelPattern))
+		if len(matches) != 1 {
+			os.RemoveAll(staging)
+			return fmt.Errorf("downloader completed but did not install the expected %s model", feature.effect)
+		}
+		target := filepath.Join(root, "features", feature.directory)
+		if err := run(ctx, false, "", "sudo", "rm", "-rf", target); err != nil {
+			os.RemoveAll(staging)
+			return err
+		}
+		if err := run(ctx, false, "", "sudo", "cp", "-a", source, target); err != nil {
+			os.RemoveAll(staging)
+			return err
+		}
+		if err := os.RemoveAll(staging); err != nil {
+			return err
+		}
+		fmt.Printf("ok: Maxine audio feature installed: %s\n", feature.effect)
+	}
+	return nil
+}
+
+func createPatchedAFXDownloader(script string) (string, error) {
+	content, err := os.ReadFile(script)
+	if err != nil {
+		return "", err
+	}
+	patched, err := patchAFXDownloader(string(content))
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp("", "nv-x-download-features-*.sh")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if _, err := file.WriteString(patched); err != nil {
+		file.Close()
+		os.Remove(name)
+		return "", err
+	}
+	if err := file.Chmod(0o700); err != nil {
+		file.Close()
+		os.Remove(name)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
+func patchAFXDownloader(content string) (string, error) {
+	const shebang = "#!/bin/bash\n"
+	if !strings.HasPrefix(content, shebang) {
+		return "", fmt.Errorf("unsupported NVIDIA AFX downloader: missing bash shebang")
+	}
+	patched := strings.Replace(content, shebang, shebang+"set -e\n", 1)
+	replacements := [][2]string{
+		{"local TEMP_FILE=/tmp/temp_list", "local TEMP_FILE=$(mktemp /tmp/nv-x-afx-list.XXXXXX)"},
+		{"local TEMP_TAR_FILE=/tmp/temp_lib.tar.gz", "local TEMP_TAR_FILE=$(mktemp /tmp/nv-x-afx-lib.XXXXXX.tar.gz)"},
+	}
+	for _, replacement := range replacements {
+		if !strings.Contains(patched, replacement[0]) {
+			return "", fmt.Errorf("unsupported NVIDIA AFX downloader: expected temporary-file declaration not found")
+		}
+		patched = strings.Replace(patched, replacement[0], replacement[1], 1)
+	}
+	return patched, nil
+}
+
+func ngcAPIKey() (string, error) {
+	for _, name := range []string{"NGC_API_KEY", "NGC_CLI_API_KEY"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value, nil
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(filepath.Join(home, ".ngc", "config"))
+	if err == nil {
+		defer file.Close()
+		if key, err := readNGCAPIKey(file); err != nil {
+			return "", err
+		} else if key != "" {
+			return key, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read NGC config: %w", err)
+	}
+
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return "", fmt.Errorf("NGC API key not found in the environment or ~/.ngc/config, and setup is not running in an interactive terminal; run ngc config set or export NGC_API_KEY")
+	}
+	fmt.Fprint(os.Stderr, "NGC API key not found in the environment or ~/.ngc/config.\nEnter NGC API key: ")
+	value, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read NGC API key: %w", err)
+	}
+	key := strings.TrimSpace(string(value))
+	if key == "" {
+		return "", fmt.Errorf("NGC API key cannot be empty")
+	}
+	return key, nil
+}
+
+func readNGCAPIKey(reader io.Reader) (string, error) {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		key, value, ok := strings.Cut(strings.TrimSpace(scanner.Text()), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "apikey") && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value), nil
+		}
+	}
+	return "", scanner.Err()
+}
+
+func runPrivilegedAudio(ctx context.Context, dir, name string, args ...string) error {
+	if os.Geteuid() == 0 {
+		return run(ctx, false, dir, name, args...)
+	}
+	full := append([]string{"--preserve-env=NGC_API_KEY", name}, args...)
+	return run(ctx, false, dir, "sudo", full...)
 }
 
 func ensureConfig(force, dryRun bool) error {
@@ -249,9 +595,21 @@ func ensureMaxine(ctx context.Context, cfg config.Config, opts Options) error {
 	if _, err := os.Stat(script); err != nil {
 		return fmt.Errorf("%s not found; install/extract NVIDIA VFX SDK Core to %s first", script, sdkPath)
 	}
-	if os.Getenv("NGC_CLI_API_KEY") == "" {
-		return fmt.Errorf("NGC_CLI_API_KEY is required; run: export NGC_CLI_API_KEY=<your_api_key>")
+	key, err := ngcAPIKey()
+	if err != nil {
+		return err
 	}
+	old, existed := os.LookupEnv("NGC_CLI_API_KEY")
+	if err := os.Setenv("NGC_CLI_API_KEY", key); err != nil {
+		return err
+	}
+	defer func() {
+		if existed {
+			_ = os.Setenv("NGC_CLI_API_KEY", old)
+		} else {
+			_ = os.Unsetenv("NGC_CLI_API_KEY")
+		}
+	}()
 
 	fmt.Printf("installing Maxine features: %s\n", opts.Features)
 	args := []string{"-f", opts.Features, "--ngc-org", opts.NGCOrg, "--ngc-team", opts.NGCTeam}
@@ -285,7 +643,7 @@ func ensureLoopbackConfig(ctx context.Context, cfg config.Config, opts Options) 
 		}
 	}
 	if len(conflicts) > 0 && !opts.Force {
-		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with --force if you intentionally want nv-vcam to coexist with them", strings.Join(conflicts, ", "))
+		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with --force if you intentionally want nv-x to coexist with them", strings.Join(conflicts, ", "))
 	}
 	if _, err := os.Stat(target); err == nil && !opts.Force {
 		fmt.Printf("ok: loopback config exists: %s\n", target)
@@ -298,7 +656,7 @@ func ensureLoopbackConfig(ctx context.Context, cfg config.Config, opts Options) 
 		return nil
 	}
 
-	temp, err := os.CreateTemp("", "nv-vcam-v4l2loopback-*.conf")
+	temp, err := os.CreateTemp("", "nv-x-v4l2loopback-*.conf")
 	if err != nil {
 		return err
 	}
@@ -340,7 +698,7 @@ func reloadLoopback(ctx context.Context, cfg config.Config, dryRun bool) error {
 
 func isServiceNotLoaded(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "Unit nv-vcam.service not loaded") || strings.Contains(msg, "not loaded")
+	return strings.Contains(msg, "Unit nv-x.service not loaded") || strings.Contains(msg, "not loaded")
 }
 
 func runPrivileged(ctx context.Context, dryRun bool, dir, name string, args ...string) error {

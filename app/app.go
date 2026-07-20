@@ -13,11 +13,12 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"nv-vcam/internal/config"
-	"nv-vcam/internal/devices"
-	"nv-vcam/internal/fx"
-	"nv-vcam/internal/loopback"
-	svc "nv-vcam/internal/service"
+	"nv-x/internal/audio"
+	"nv-x/internal/config"
+	"nv-x/internal/devices"
+	"nv-x/internal/fx"
+	"nv-x/internal/loopback"
+	svc "nv-x/internal/service"
 )
 
 type App struct {
@@ -42,7 +43,11 @@ type ConfigView struct {
 }
 
 type UserSettings struct {
+	CameraInput      string  `json:"cameraInput"`
 	Mode             string  `json:"mode"`
+	AudioMode        string  `json:"audioMode"`
+	AudioInputNode   string  `json:"audioInputNode"`
+	AudioIntensity   float64 `json:"audioIntensity"`
 	LightEnabled     bool    `json:"lightEnabled"`
 	LightAddress     string  `json:"lightAddress"`
 	LightBrightness  int     `json:"lightBrightness"`
@@ -81,6 +86,8 @@ type AppStatus struct {
 	ExpectedOutputExists bool             `json:"expectedOutputExists"`
 	ConfigRendered       string           `json:"configRendered"`
 	FX                   fx.Snapshot      `json:"fx"`
+	Audio                audio.Snapshot   `json:"audio"`
+	AudioSources         []audio.Source   `json:"audioSources"`
 }
 
 func NewApp() *App {
@@ -95,7 +102,9 @@ func (a *App) GetStatus() AppStatus {
 	cfg := loadEffectiveConfig()
 	devs, _ := devices.ListDefault()
 	manager := svc.New(cfg.Service.Name)
-	active, out, err := manager.Active(a.timeout())
+	ctx, cancel := a.timeout()
+	defer cancel()
+	active, out, err := manager.Active(ctx)
 	serviceErr := ""
 	if err != nil {
 		serviceErr = compactError(err)
@@ -105,13 +114,20 @@ func (a *App) GetStatus() AppStatus {
 		State:        fx.StateDisabled,
 		Device:       cfg.Output.Device,
 		Dependencies: fx.MissingDependencies(cfg),
-		Message:      "fx state file not found; start nv-vcam.service",
+		Message:      "fx state file not found; start nv-x.service",
 	}
 	if statePath, err := fx.DefaultStatePath(); err == nil {
 		if snap, ok := fx.ReadState(statePath); ok {
 			fxSnapshot = snap
 		}
 	}
+	audioSnapshot := audio.Snapshot{State: audio.StateDisabled, Mode: cfg.Audio.Mode, InputNode: cfg.Audio.InputNode, OutputNode: cfg.Audio.OutputNodeName, Message: "audio state file not found; start nv-x.service"}
+	if statePath, err := audio.DefaultStatePath(); err == nil {
+		if snap, ok := audio.ReadState(statePath); ok {
+			audioSnapshot = snap
+		}
+	}
+	audioSources, _ := audio.ListSources(ctx, cfg.Audio.OutputNodeName)
 
 	return AppStatus{
 		Devices:              devs,
@@ -131,12 +147,22 @@ func (a *App) GetStatus() AppStatus {
 		ExpectedOutputExists: devices.DeviceExists(cfg.Output.Device),
 		ConfigRendered:       config.Render(cfg),
 		FX:                   fxSnapshot,
+		Audio:                audioSnapshot,
+		AudioSources:         audioSources,
 	}
 }
 
 func (a *App) ListDevices() []devices.Device {
 	devs, _ := devices.ListDefault()
 	return devs
+}
+
+func (a *App) ListAudioSources() []audio.Source {
+	cfg := loadEffectiveConfig()
+	ctx, cancel := a.timeout()
+	defer cancel()
+	sources, _ := audio.ListSources(ctx, cfg.Audio.OutputNodeName)
+	return sources
 }
 
 func (a *App) GetConfig() ConfigView {
@@ -195,6 +221,12 @@ func (a *App) SaveUserSettings(settings UserSettings) ActionResult {
 	if err := config.ValidateBackgroundMode(settings.Mode); err != nil {
 		return result("", "", err)
 	}
+	if err := config.ValidateAudioMode(settings.AudioMode); err != nil {
+		return result("", "", err)
+	}
+	if err := config.ValidateAudioIntensity(settings.AudioIntensity); err != nil {
+		return result("", "", err)
+	}
 	if err := config.ValidateLightBrightness(settings.LightBrightness); err != nil {
 		return result("", "", err)
 	}
@@ -211,6 +243,13 @@ func (a *App) SaveUserSettings(settings UserSettings) ActionResult {
 		return result("", "", err)
 	}
 	cfg.FX.Mode = settings.Mode
+	if strings.TrimSpace(settings.CameraInput) == "" {
+		return result("", "", fmt.Errorf("camera input is required"))
+	}
+	cfg.Camera.InputDevice = strings.TrimSpace(settings.CameraInput)
+	cfg.Audio.Mode = settings.AudioMode
+	cfg.Audio.InputNode = strings.TrimSpace(settings.AudioInputNode)
+	cfg.Audio.DereverbDenoiserIntensity = settings.AudioIntensity
 	cfg.FX.BlurStrength = settings.BlurStrength
 	cfg.FX.ChromaColor = settings.ChromaColor
 	cfg.FX.BackgroundImage = strings.TrimSpace(settings.BackgroundImage)
@@ -251,7 +290,7 @@ func (a *App) ShowLoopback() LoopbackView {
 	}
 	warning := ""
 	if conflict {
-		warning = "Another active v4l2loopback config exists. nv-vcam write will refuse unless force is enabled."
+		warning = "Another active v4l2loopback config exists. nv-x write will refuse unless force is enabled."
 	}
 	return LoopbackView{
 		TargetPath: cfg.Loopback.ConfigPath,
@@ -266,7 +305,7 @@ func (a *App) WriteLoopback(force bool, dryRun bool) ActionResult {
 	cfg := loadEffectiveConfig()
 	out, err := captureOutput(func() error {
 		if dryRun {
-			return loopback.WriteConfig(cfg, force, true, "nv-vcam")
+			return loopback.WriteConfig(cfg, force, true, "nv-x")
 		}
 		return a.writeLoopbackElevated(cfg, force)
 	})
@@ -277,7 +316,9 @@ func (a *App) ReloadLoopback(dryRun bool) ActionResult {
 	cfg := loadEffectiveConfig()
 	out, err := captureOutput(func() error {
 		if dryRun {
-			return loopback.Reload(a.timeout(), cfg, true)
+			ctx, cancel := a.timeout()
+			defer cancel()
+			return loopback.Reload(ctx, cfg, true)
 		}
 		return a.reloadLoopbackElevated(cfg)
 	})
@@ -287,7 +328,9 @@ func (a *App) ReloadLoopback(dryRun bool) ActionResult {
 func (a *App) InstallService(force bool, enable bool, start bool, dryRun bool) ActionResult {
 	cfg := loadEffectiveConfig()
 	out, err := captureOutput(func() error {
-		return svc.Install(a.timeout(), cfg, force, dryRun, enable, start)
+		ctx, cancel := a.timeout()
+		defer cancel()
+		return svc.Install(ctx, cfg, force, dryRun, enable, start)
 	})
 	return result("service install completed", out, err)
 }
@@ -313,7 +356,9 @@ func (a *App) RestartService() ActionResult {
 func (a *App) GetServiceStatus() ActionResult {
 	cfg := loadEffectiveConfig()
 	manager := svc.New(cfg.Service.Name)
-	out, err := manager.Status(a.timeout())
+	ctx, cancel := a.timeout()
+	defer cancel()
+	out, err := manager.Status(ctx)
 	return result("service status completed", out, err)
 }
 
@@ -321,18 +366,19 @@ func (a *App) serviceAction(message string, fn func(context.Context, svc.Manager
 	cfg := loadEffectiveConfig()
 	manager := svc.New(cfg.Service.Name)
 	out, err := captureOutput(func() error {
-		return fn(a.timeout(), manager)
+		ctx, cancel := a.timeout()
+		defer cancel()
+		return fn(ctx, manager)
 	})
 	return result(message, out, err)
 }
 
-func (a *App) timeout() context.Context {
+func (a *App) timeout() (context.Context, context.CancelFunc) {
 	base := a.ctx
 	if base == nil {
 		base = context.Background()
 	}
-	ctx, _ := context.WithTimeout(base, 15*time.Second)
-	return ctx
+	return context.WithTimeout(base, 15*time.Second)
 }
 
 func loadConfigWithFound() (config.Config, bool) {
@@ -375,9 +421,9 @@ func (a *App) writeLoopbackElevated(cfg config.Config, force bool) error {
 		}
 	}
 	if len(conflicts) > 0 && !force {
-		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with force enabled if you intentionally want nv-vcam to coexist with them", strings.Join(conflicts, ", "))
+		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with force enabled if you intentionally want nv-x to coexist with them", strings.Join(conflicts, ", "))
 	}
-	temp, err := os.CreateTemp("", "nv-vcam-v4l2loopback-*.conf")
+	temp, err := os.CreateTemp("", "nv-x-v4l2loopback-*.conf")
 	if err != nil {
 		return err
 	}
@@ -392,7 +438,9 @@ func (a *App) writeLoopbackElevated(cfg config.Config, force bool) error {
 	if err := os.Chmod(temp.Name(), 0o644); err != nil {
 		return err
 	}
-	_, err = runPkexec(a.timeout(), "install", "-m", "0644", temp.Name(), cfg.Loopback.ConfigPath)
+	ctx, cancel := a.timeout()
+	defer cancel()
+	_, err = runPkexec(ctx, "install", "-m", "0644", temp.Name(), cfg.Loopback.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("%w\nfallback: %s", err, loopbackWriteFallback(force))
 	}
@@ -402,9 +450,9 @@ func (a *App) writeLoopbackElevated(cfg config.Config, force bool) error {
 
 func loopbackWriteFallback(force bool) string {
 	home, err := os.UserHomeDir()
-	binary := "nv-vcam"
+	binary := "nv-x"
 	if err == nil {
-		binary = filepath.Join(home, ".local", "bin", "nv-vcam")
+		binary = filepath.Join(home, ".local", "bin", "nv-x")
 	}
 	cmd := "sudo " + binary + " loopback write"
 	if force {
@@ -415,11 +463,13 @@ func loopbackWriteFallback(force bool) string {
 
 func (a *App) reloadLoopbackElevated(cfg config.Config) error {
 	manager := svc.New(cfg.Service.Name)
-	if err := manager.Stop(a.timeout(), false); err != nil {
+	ctx, cancel := a.timeout()
+	defer cancel()
+	if err := manager.Stop(ctx, false); err != nil {
 		fmt.Printf("warning: could not stop %s before reload: %v\n", cfg.Service.Name, err)
 	}
 	script := "modprobe -r v4l2loopback && modprobe v4l2loopback"
-	if out, err := runPkexec(a.timeout(), "sh", "-c", script); err != nil {
+	if out, err := runPkexec(ctx, "sh", "-c", script); err != nil {
 		if strings.TrimSpace(out) != "" {
 			fmt.Println(strings.TrimSpace(out))
 		}

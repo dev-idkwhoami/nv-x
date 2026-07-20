@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 func TestNormalizeStreamOptionsUsesNativeDefaults(t *testing.T) {
@@ -104,7 +104,7 @@ func TestIdleOutputHelperArgs(t *testing.T) {
 		"--width 1920",
 		"--height 1080",
 		"--fps 50",
-		"--idle-label NV-vCam idling ...",
+		"--idle-label NV-X idling ...",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("expected %q in args:\n%s", want, args)

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Camera, Image, Moon, Palette, RefreshCw, Settings, Sun } from '@lucide/svelte'
+  import { Camera, Image, Mic, Moon, Palette, Power, RefreshCw, Settings, Sun } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
   import { Label } from '$lib/components/ui/label'
   import { Switch } from '$lib/components/ui/switch'
@@ -14,8 +14,9 @@
   import type { main } from '../wailsjs/go/models'
 
   type Mode = 'blur' | 'replace' | 'chroma'
+  type AudioMode = 'off' | 'dereverb_denoiser' | 'studio_voice_low_latency'
   type Theme = 'system' | 'light' | 'dark'
-  type Page = 'video' | 'settings'
+  type Page = 'video' | 'audio' | 'settings'
 
   let status = $state<main.AppStatus | null>(null)
   let page = $state<Page>('video')
@@ -29,6 +30,10 @@
   let restartTimer: ReturnType<typeof setTimeout> | undefined
 
   let mode = $state<Mode>('blur')
+  let cameraInput = $state('/dev/video0')
+  let audioMode = $state<AudioMode>('off')
+  let audioInputNode = $state('')
+  let audioIntensity = $state(0.9)
   let lightEnabled = $state(false)
   let lightAddress = $state('')
   let lightBrightness = $state(20)
@@ -47,8 +52,11 @@
   const chromaPalette = ['#00ff00', '#0000ff', '#ff00ff', '#ffffff', '#000000']
 
   let effectiveDark = $derived(theme === 'dark' || (theme === 'system' && systemDark))
-  let serviceState = $derived(status?.service.active ? 'Running' : 'Stopped')
   let streamState = $derived(status?.fx?.state ?? 'unknown')
+  let audioState = $derived(status?.audio?.state ?? 'disabled')
+  let serviceOnline = $derived(Boolean(status?.service.active))
+  let cameraOnline = $derived(serviceOnline && Boolean(status?.expectedOutputExists) && (streamState === 'idle' || streamState === 'active'))
+  let microphoneOnline = $derived(serviceOnline && audioState === 'active')
   let syncState = $derived(restarting ? 'Restarting service...' : saving ? 'Saving...' : message)
 
   $effect(() => {
@@ -93,6 +101,12 @@
 
   function hydrate(cfg: any) {
     mode = normalizeMode(cfg.FX.Mode)
+    const configuredCamera = cfg.Camera.InputDevice ?? '/dev/video0'
+    const selectedCamera = status?.devices?.find((device) => device.Path === configuredCamera || device.StablePath === configuredCamera)
+    cameraInput = selectedCamera?.StablePath || configuredCamera
+    audioMode = normalizeAudioMode(cfg.Audio?.Mode)
+    audioInputNode = cfg.Audio?.InputNode ?? ''
+    audioIntensity = Number(cfg.Audio?.DereverbDenoiserIntensity ?? 0.9)
     lightEnabled = Boolean(cfg.Light.Enabled)
     lightAddress = cfg.Light.Address ?? ''
     lightBrightness = Number(cfg.Light.Brightness ?? 20)
@@ -105,6 +119,10 @@
     hydrated = true
   }
 
+  function normalizeAudioMode(value: string): AudioMode {
+    return value === 'dereverb_denoiser' || value === 'studio_voice_low_latency' ? value : 'off'
+  }
+
   function normalizeMode(value: string): Mode {
     return value === 'replace' || value === 'chroma' ? value : 'blur'
   }
@@ -115,7 +133,11 @@
 
   function settingsPayload(): main.UserSettings {
     return {
+      cameraInput,
       mode,
+      audioMode,
+      audioInputNode,
+      audioIntensity,
       lightEnabled,
       lightAddress,
       lightBrightness,
@@ -125,6 +147,15 @@
       backgroundImage,
       theme
     }
+  }
+
+  function toggleAudioMode(next: Exclude<AudioMode, 'off'>) {
+    audioMode = audioMode === next ? 'off' : next
+  }
+
+  function cameraDisplayName(name: string) {
+    const parts = name.split(':').map((part) => part.trim())
+    return parts.length === 2 && parts[0] === parts[1] ? parts[0] : name
   }
 
   function settingsSignature() {
@@ -196,6 +227,18 @@
       <div class="h-11 border-b border-[#242424]"></div>
       <nav class="flex flex-col">
         <button
+          class="flex h-[86px] flex-col items-center justify-center gap-2 border-l-4 text-sm"
+          class:border-[#76b900]={page === 'audio'}
+          class:border-transparent={page !== 'audio'}
+          class:bg-[#242424]={page === 'audio'}
+          class:text-white={page === 'audio'}
+          class:text-[#aaa]={page !== 'audio'}
+          onclick={() => (page = 'audio')}
+        >
+          <Mic size={26} />
+          Audio
+        </button>
+        <button
           class="relative flex h-[86px] flex-col items-center justify-center gap-2 border-l-4 text-sm"
           class:border-[#76b900]={page === 'video'}
           class:border-transparent={page !== 'video'}
@@ -225,13 +268,22 @@
     <section class="min-w-0">
       <header class="flex h-[86px] items-center justify-between border-b border-[#202020] bg-[#262626] px-8 shadow-[0_2px_5px_rgb(0_0_0_/_45%)]">
         <div>
-          <p class="text-xs uppercase tracking-[0.18em] text-[#76b900]">NV-vCam</p>
-          <h1 class="text-[28px] font-semibold tracking-normal">{page === 'video' ? 'Video' : 'Settings'}</h1>
+          <p class="text-xs uppercase tracking-[0.18em] text-[#76b900]">NV-X</p>
+          <h1 class="text-[28px] font-semibold tracking-normal">{page === 'video' ? 'Video' : page === 'audio' ? 'Audio' : 'Settings'}</h1>
         </div>
         <div class="flex items-center gap-3 text-sm text-[#bdbdbd]">
           <span>{syncState}</span>
-          <span>{serviceState}</span>
-          <span class="h-1.5 w-1.5 rounded-full" class:bg-[#76b900]={status?.service.active} class:bg-[#6b6b6b]={!status?.service.active}></span>
+          <span class="flex items-center gap-2 border-l border-[#444] pl-3">
+            <span title={`Service ${serviceOnline ? 'online' : 'offline'}`} aria-label={`Service ${serviceOnline ? 'online' : 'offline'}`}>
+              <Power size={18} class={serviceOnline ? 'text-[#76b900]' : 'text-[#666]'} />
+            </span>
+            <span title={`Camera ${cameraOnline ? 'online' : 'offline'}`} aria-label={`Camera ${cameraOnline ? 'online' : 'offline'}`}>
+              <Camera size={19} class={cameraOnline ? 'text-[#76b900]' : 'text-[#666]'} />
+            </span>
+            <span title={`Microphone ${microphoneOnline ? 'online' : 'offline'}`} aria-label={`Microphone ${microphoneOnline ? 'online' : 'offline'}`}>
+              <Mic size={19} class={microphoneOnline ? 'text-[#76b900]' : 'text-[#666]'} />
+            </span>
+          </span>
           <Button variant="secondary" size="sm" onclick={() => refresh()} disabled={saving || restarting}>
             <RefreshCw size={16} />
           </Button>
@@ -240,9 +292,15 @@
 
       {#if page === 'video'}
         <section class="max-w-[760px] px-8 py-9">
-          <div class="mb-8 flex h-[42px] items-center bg-[#353535] px-4 text-sm text-[#d6d6d6]">
-            <Camera class="mr-3 text-[#d6d6d6]" size={20} />
-            <span class="truncate">{status?.expectedOutput ?? '/dev/video10'} · {streamState}</span>
+          <div class="mb-8 space-y-2">
+            <Label class="text-sm text-[#cfcfcf]">Camera input</Label>
+            <select class="h-11 w-full border border-[#3a3a3a] bg-[#242424] px-3 text-sm text-white outline-none focus:border-[#76b900]" bind:value={cameraInput}>
+              {#each status?.devices ?? [] as device}
+                {#if device.Capture && device.Path !== status?.expectedOutput && device.Name !== 'NV-X Camera'}
+                  <option value={device.StablePath || device.Path}>{cameraDisplayName(device.Name)}</option>
+                {/if}
+              {/each}
+            </select>
           </div>
 
           <h2 class="mb-6 text-[26px] font-semibold uppercase tracking-normal text-[#76b900]">Camera effects</h2>
@@ -307,6 +365,54 @@
               </div>
             {/each}
           </div>
+        </section>
+      {:else if page === 'audio'}
+        <section class="max-w-[760px] px-8 py-9">
+          <div class="mb-8 space-y-2">
+            <Label class="text-sm text-[#cfcfcf]">Microphone input</Label>
+            <select class="h-11 w-full border border-[#3a3a3a] bg-[#242424] px-3 text-sm text-white outline-none focus:border-[#76b900]" bind:value={audioInputNode}>
+              <option value="">System Default</option>
+              {#each status?.audioSources ?? [] as source}
+                <option value={source.nodeName}>{source.description}{source.default ? ' · Default' : ''}</option>
+              {/each}
+            </select>
+          </div>
+
+          <h2 class="mb-6 text-[26px] font-semibold uppercase tracking-normal text-[#76b900]">Microphone effects</h2>
+          <div class="divide-y divide-[#2e2e2e]">
+            <div class="py-7">
+              <button class="grid w-full grid-cols-[1fr_58px] items-center gap-6 text-left" onclick={() => toggleAudioMode('dereverb_denoiser')}>
+                <span>
+                  <span class="block text-[24px] font-semibold text-white">Noise & room echo removal</span>
+                  <span class="mt-1 block text-[18px] leading-snug text-[#aaa]">Reduces background noise and room reverberation.</span>
+                </span>
+                <span class="relative h-6 w-12 rounded-full transition" class:bg-[#76b900]={audioMode === 'dereverb_denoiser'} class:bg-[#555]={audioMode !== 'dereverb_denoiser'}>
+                  <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition" class:left-[26px]={audioMode === 'dereverb_denoiser'} class:left-0.5={audioMode !== 'dereverb_denoiser'}></span>
+                </span>
+              </button>
+              {#if audioMode === 'dereverb_denoiser'}
+                <div class="mt-5 space-y-3 border-l-2 border-[#76b900] pl-5">
+                  <div class="flex justify-between text-sm"><Label class="text-[#cfcfcf]">Intensity</Label><span>{Math.round(audioIntensity * 100)}%</span></div>
+                  <input class="w-full accent-[#76b900]" type="range" min="0" max="1" step="0.01" bind:value={audioIntensity} />
+                </div>
+              {/if}
+            </div>
+
+            <div class="py-7">
+              <button class="grid w-full grid-cols-[1fr_58px] items-center gap-6 text-left" onclick={() => toggleAudioMode('studio_voice_low_latency')}>
+                <span>
+                  <span class="block text-[24px] font-semibold text-white">Studio Voice</span>
+                  <span class="mt-1 block text-[18px] leading-snug text-[#aaa]">Reconstructs clear studio-style speech. May add up to about 110 ms latency.</span>
+                </span>
+                <span class="relative h-6 w-12 rounded-full transition" class:bg-[#76b900]={audioMode === 'studio_voice_low_latency'} class:bg-[#555]={audioMode !== 'studio_voice_low_latency'}>
+                  <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition" class:left-[26px]={audioMode === 'studio_voice_low_latency'} class:left-0.5={audioMode !== 'studio_voice_low_latency'}></span>
+                </span>
+              </button>
+            </div>
+          </div>
+          {#if audioMode === 'off'}
+            <p class="mt-6 text-sm text-[#aaa]">Both effects are off. NV-X Microphone will not be published.</p>
+          {/if}
         </section>
       {:else}
         <section class="max-w-[720px] px-8 py-9">

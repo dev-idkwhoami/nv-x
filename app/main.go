@@ -18,7 +18,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:         "nv-vcam",
+		Title:         "NV-X — NVIDIA Effects",
 		Width:         900,
 		Height:        760,
 		MinWidth:      900,
@@ -30,7 +30,7 @@ func main() {
 			Assets: assets,
 		},
 		Linux: &linux.Options{
-			ProgramName:      "nv-vcam-gui",
+			ProgramName:      "nv-x-gui",
 			WebviewGpuPolicy: linux.WebviewGpuPolicyNever,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},

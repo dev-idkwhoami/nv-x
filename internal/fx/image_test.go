@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 func TestRunTestImageRequiresInputAndOutputs(t *testing.T) {

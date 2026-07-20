@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"nv-vcam/internal/config"
-	"nv-vcam/internal/devices"
-	"nv-vcam/internal/service"
+	"nv-x/internal/config"
+	"nv-x/internal/devices"
+	"nv-x/internal/service"
 )
 
 type FoundConfig struct {
@@ -27,7 +27,7 @@ func Render(cfg config.Config) string {
 	if cfg.Loopback.ExclusiveCaps {
 		exclusive = "1"
 	}
-	return fmt.Sprintf("# Managed by nv-vcam\noptions v4l2loopback devices=1 video_nr=%d card_label=%q exclusive_caps=%s max_buffers=%d\n",
+	return fmt.Sprintf("# Managed by nv-x\noptions v4l2loopback devices=1 video_nr=%d card_label=%q exclusive_caps=%s max_buffers=%d\n",
 		cfg.Output.VideoNR,
 		cfg.Output.Label,
 		exclusive,
@@ -91,7 +91,7 @@ func WriteConfig(cfg config.Config, force, dryRun bool, argv0 string) error {
 		}
 	}
 	if len(conflicts) > 0 && !force {
-		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with --force if you intentionally want nv-vcam to coexist with them", strings.Join(conflicts, ", "))
+		return fmt.Errorf("refusing to write because other v4l2loopback config files exist: %s\nrerun with --force if you intentionally want nv-x to coexist with them", strings.Join(conflicts, ", "))
 	}
 	if dryRun {
 		fmt.Printf("would write %s:\n%s", target, Render(cfg))
@@ -164,7 +164,7 @@ func run(ctx context.Context, dryRun bool, name string, args ...string) error {
 func sudoCommand(argv0 string, args ...string) string {
 	name := argv0
 	if name == "" {
-		name = "nv-vcam"
+		name = "nv-x"
 	}
 	return "sudo " + name + " " + strings.Join(args, " ")
 }

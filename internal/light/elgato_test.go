@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"nv-vcam/internal/config"
+	"nv-x/internal/config"
 )
 
 func TestControllerSetsLightOnWithConfiguredValues(t *testing.T) {

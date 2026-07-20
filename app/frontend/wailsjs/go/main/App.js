@@ -26,6 +26,10 @@ export function InstallService(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['InstallService'](arg1, arg2, arg3, arg4);
 }
 
+export function ListAudioSources() {
+  return window['go']['main']['App']['ListAudioSources']();
+}
+
 export function ListDevices() {
   return window['go']['main']['App']['ListDevices']();
 }

@@ -40,7 +40,7 @@ struct Options {
   std::string inputFormat = "nv12";
   std::string outputDevice = "/dev/video10";
   std::string outputFormat = "yuv420p";
-  std::string idleLabel = "NV-vCam idling ...";
+  std::string idleLabel = "NV-X idling ...";
   std::string background = "blur";
   std::string replacement;
   std::string chromaColor = "#00ff00";
@@ -1170,7 +1170,7 @@ void idleOutput(const Options &opts) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: nv-vcam-maxine-helper doctor|test-image|stream|native-stream|native-transfer|idle-output [flags]\n");
+    std::fprintf(stderr, "usage: nv-x-video doctor|test-image|stream|native-stream|native-transfer|idle-output [flags]\n");
     return 2;
   }
 
