@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="Native NVIDIA Maxine video and audio effects service"
 arch=('x86_64')
 url="https://github.com/dev-idkwhoami/nv-x"
-license=('custom')
+license=('MIT')
 depends=(
   'gtk3'
   'webkit2gtk-4.1'
@@ -45,4 +45,5 @@ package() {
 
   install -Dm0644 app/build/linux/nv-x-gui.desktop "$pkgdir/usr/share/applications/nv-x-gui.desktop"
   install -Dm0644 app/build/linux-icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/nv-x-gui.png"
+  install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

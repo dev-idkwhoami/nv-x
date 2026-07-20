@@ -1,68 +1,44 @@
 # nv-x
 
+> [!IMPORTANT]
+> NV-X was built and tested around the author's specific Linux, NVIDIA GPU, camera, and audio setup. It is shared as a practical starting point rather than a universal solution—feel free to fork it, adapt it to your own hardware, and optimize or redesign any part of it under the project license.
+
+> [!WARNING]
+> NV-X depends on proprietary NVIDIA Maxine SDKs, models, and other resources obtained through NVIDIA NGC. Those NVIDIA materials are **not** covered by this repository's [MIT license](LICENSE) and are governed by the separate terms supplied by NVIDIA and NGC. `nv-x setup` downloads them for the local user but does not grant permission to redistribute them. Review and accept the applicable NVIDIA licenses before downloading, using, or distributing any NVIDIA component.
+
 `nv-x` (NVIDIA Effects) is a native Linux video and audio effects service with a configuration-only desktop GUI.
 
-The current native-ingest path is Cam Link first:
+## Features
 
-```text
-/dev/video0 Cam Link
-  -> nv-x-video native-stream
-       V4L2 input
-       CPU NV12 -> BGR
-       NVIDIA Maxine effects
-       CPU BGR -> YU12
-       V4L2 output
-  -> /dev/video10 "NV-X Camera"
-  -> Teams/Zoom/Discord/browser/etc.
-```
-
-The audio path runs independently in the same user service:
-
-```text
-PipeWire physical/default microphone
-  -> nv-x-audio
-       NVIDIA AFX dereverb + denoise, or Studio Voice Low Latency
-       -> PipeWire source "NV-X Microphone"
-          -> Teams/Zoom/Discord/browser/etc.
-       -> optional processed self-hearing
-          -> selected/default PipeWire output
-```
-
-Default mode is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU12/yuv420p` `1920x1080 @ 50fps`.
-
-## Current Milestone
-
-- Linux only, with CachyOS / Arch Linux as the first target.
-- Go CLI/service packages under the root module.
-- Wails desktop app under `app/`.
-- One `v4l2loopback` output camera: `/dev/video10 "NV-X Camera"`.
-- On-demand native Maxine background blur, mask output, chroma background, or image replacement.
-- Optional Elgato ring light auto-control when the virtual camera has consumers.
-- Maxine still-image validation commands.
-- One optional PipeWire virtual microphone with mutually exclusive dereverb/denoise and Studio Voice effects.
-- Demand-driven microphone capture: the virtual source remains available, while the physical microphone and AFX processing connect only when an application reads from it.
-- Optional processed self-hearing routed to a selected PipeWire output; enabling it intentionally keeps microphone capture and AFX processing active. Headphones are recommended to avoid feedback.
-- Camera, microphone, and self-hearing output selection in the GUI; an empty audio device selection follows the corresponding PipeWire system default.
+- Linux-first background service and Wails configuration GUI, targeting CachyOS/Arch.
+- `v4l2loopback` camera exposed as **NV-X Camera**.
+- Background blur, replacement, chroma, and mask video effects.
+- PipeWire microphone with dereverb/denoise or Studio Voice Low Latency.
+- Demand-driven video and audio processing when applications consume the virtual devices.
+- Optional processed self-hearing and Elgato light auto-control.
+- GUI device selection, effect controls, and service/camera/microphone status.
 
 ## Dependencies
 
-Runtime:
+Required before running `nv-x setup`:
 
 - Linux with systemd user services.
 - `v4l2loopback-dkms` and matching kernel headers for the running kernel.
 - Cam Link or another V4L2 input that can provide `NV12 1920x1080 @ 50fps`.
 - NVIDIA GPU/driver stack compatible with NVIDIA Maxine.
 - NVIDIA NGC CLI authenticated with `ngc config set`, or an API key exported as `NGC_API_KEY`/`NGC_CLI_API_KEY`.
-- NVIDIA Maxine Video Effects SDK Core installed under `/usr/local/VideoFX`.
 - PipeWire, PipeWire Pulse compatibility, and WirePlumber.
-- NVIDIA Maxine Audio Effects SDK 2.1 installed under `/usr/local/AudioFX` with the 48 kHz `dereverb_denoiser` and `studio_voice` models.
-- Maxine feature packages installed under `/usr/local/VideoFX/features`:
-  - `nvvfxgreenscreen` for segmentation.
-  - `nvvfxbackgroundblur` for blur mode.
-- Maxine TensorRT model packages under `/usr/local/VideoFX/lib/models`.
 - `pkexec`/polkit for GUI loopback write/reload elevation.
 - `fuser` from `psmisc` is optional but useful for troubleshooting busy devices.
 - Wails GUI runtime dependencies: GTK 3 and WebKitGTK 4.1.
+
+You do **not** need to install the Maxine SDKs or models manually for normal use. `nv-x setup` provisions:
+
+- Maxine Video Effects SDK Core under `/usr/local/VideoFX`.
+- GreenScreen, BackgroundBlur, and their required VideoFX/TensorRT models.
+- Maxine Audio Effects SDK 2.1 under `/usr/local/AudioFX`.
+- The 48 kHz dereverb/denoiser and Studio Voice Low Latency audio models.
+- The NV-X user config, v4l2loopback configuration, and systemd user service.
 
 Build:
 
@@ -70,7 +46,8 @@ Build:
 - Wails v2 CLI.
 - Bun.
 - WebKitGTK/GTK development packages required by Wails. On this system the Wails build uses the `webkit2_41` tag, configured in `app/wails.json`.
-- C/C++ build tools for the native Maxine helper.
+- C/C++ build tools for the native Maxine helpers.
+- Maxine SDK headers and libraries at the configured `MAXINE_SDK` and `AFX_SDK` paths when compiling the native helpers directly from source. This build-time requirement does not apply when installing an already-built NV-X package.
 - `makepkg`/`pacman` for the CachyOS/Arch package install flow.
 
 Arch/CachyOS package names are typically:
@@ -100,6 +77,20 @@ export NGC_API_KEY=<your-ngc-api-key>
 `nv-x setup` provisions both SDK families and their required models. Use `--skip-video` or `--skip-audio` only for troubleshooting.
 It checks `NGC_API_KEY`, `NGC_CLI_API_KEY`, and `~/.ngc/config` in that order. If none contains a key, an interactive setup securely prompts for one without echoing it.
 
+## Minimal Usage
+
+Starting with an installed NV-X package, authenticate the NGC CLI and run setup as your normal desktop user:
+
+```bash
+ngc config set
+nv-x setup
+nv-x-gui
+```
+
+`nv-x setup` may ask for sudo when installing the SDKs and configuring v4l2loopback, but the command itself must not be run with `sudo`. It installs, enables, and starts `nv-x.service` for your user.
+
+In the GUI, select the camera and microphone inputs, then enable one video effect and—optionally—one audio effect. In calling or recording applications, select **NV-X Camera** and/or **NV-X Microphone** as the input devices. The background service keeps the virtual devices available and starts the expensive processing paths only when they are needed; enabling self-hearing intentionally keeps audio processing active.
+
 ## Build And Install
 
 Recommended CachyOS/Arch desktop install:
@@ -121,6 +112,7 @@ The package installs:
 /usr/lib/nv-x/nv-x-os-release-shim.so
 /usr/share/applications/nv-x-gui.desktop
 /usr/share/icons/hicolor/256x256/apps/nv-x-gui.png
+/usr/share/licenses/nv-x/LICENSE
 ```
 
 The GUI binary is intentionally named `nv-x-gui`; the CLI remains `nv-x`.
@@ -285,6 +277,36 @@ nv-x audio doctor
 pactl list short sources
 ```
 
+## Processing Architecture
+
+The video pipeline is Cam Link first by default:
+
+```text
+/dev/video0 Cam Link
+  -> nv-x-video native-stream
+       V4L2 input
+       CPU NV12 -> BGR
+       NVIDIA Maxine effects
+       CPU BGR -> YU12
+       V4L2 output
+  -> /dev/video10 "NV-X Camera"
+  -> Teams/Zoom/Discord/browser/etc.
+```
+
+Its default format is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU12/yuv420p` at the same resolution and frame rate.
+
+Audio runs independently in the same user service:
+
+```text
+PipeWire physical/default microphone
+  -> nv-x-audio
+       NVIDIA AFX dereverb + denoise, or Studio Voice Low Latency
+       -> PipeWire source "NV-X Microphone"
+          -> Teams/Zoom/Discord/browser/etc.
+       -> optional processed self-hearing
+          -> selected/default PipeWire output
+```
+
 ## Light Auto-Control
 
 `[light].enabled = true` lets the service turn an Elgato light on when an external app starts consuming `/dev/video10`, and turn it off when the stream returns to idle.
@@ -351,3 +373,7 @@ app/build/bin/nv-x-gui
 ```
 
 The installed desktop app from `make desktop` is launched as `nv-x-gui`. The user UI has separate Video and Audio tabs for device/effect selection, dereverb/denoiser intensity, and processed self-hearing. Its Settings page controls theme and Elgato light auto-control. Changes are saved to the user config and restart the background service automatically after a short debounce.
+
+## License
+
+NV-X's original source code and project assets are available under the [MIT License](LICENSE). Dependencies and third-party materials remain under their own terms. NVIDIA Maxine SDKs, models, and NGC resources are not relicensed or redistributed by this repository; consult the license files supplied with each NVIDIA download before use or distribution.
