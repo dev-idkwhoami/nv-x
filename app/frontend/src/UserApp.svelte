@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Camera, Image, Mic, Moon, Palette, Power, RefreshCw, Settings, Sun } from '@lucide/svelte'
+  import { Camera, Headphones, Image, Mic, Moon, Palette, Power, RefreshCw, Settings, Sun } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
   import { Label } from '$lib/components/ui/label'
   import { Switch } from '$lib/components/ui/switch'
@@ -34,6 +34,8 @@
   let audioMode = $state<AudioMode>('off')
   let audioInputNode = $state('')
   let audioIntensity = $state(0.9)
+  let monitorEnabled = $state(false)
+  let monitorOutputNode = $state('')
   let lightEnabled = $state(false)
   let lightAddress = $state('')
   let lightBrightness = $state(20)
@@ -107,6 +109,8 @@
     audioMode = normalizeAudioMode(cfg.Audio?.Mode)
     audioInputNode = cfg.Audio?.InputNode ?? ''
     audioIntensity = Number(cfg.Audio?.DereverbDenoiserIntensity ?? 0.9)
+    monitorEnabled = Boolean(cfg.Audio?.MonitorEnabled)
+    monitorOutputNode = cfg.Audio?.MonitorOutputNode ?? ''
     lightEnabled = Boolean(cfg.Light.Enabled)
     lightAddress = cfg.Light.Address ?? ''
     lightBrightness = Number(cfg.Light.Brightness ?? 20)
@@ -138,6 +142,8 @@
       audioMode,
       audioInputNode,
       audioIntensity,
+      monitorEnabled,
+      monitorOutputNode,
       lightEnabled,
       lightAddress,
       lightBrightness,
@@ -151,6 +157,7 @@
 
   function toggleAudioMode(next: Exclude<AudioMode, 'off'>) {
     audioMode = audioMode === next ? 'off' : next
+    if (audioMode === 'off') monitorEnabled = false
   }
 
   function cameraDisplayName(name: string) {
@@ -409,6 +416,39 @@
                 </span>
               </button>
             </div>
+          </div>
+
+          <div class="mt-9 border-t border-[#2e2e2e] pt-8">
+            <div class="flex items-center justify-between gap-6">
+              <div class="flex gap-4">
+                <Headphones class="mt-1 size-6 text-[#76b900]" />
+                <div>
+                  <p class="text-[22px] font-semibold text-white">Self hearing</p>
+                  <p class="mt-1 text-sm leading-relaxed text-[#aaa]">Listen to the processed microphone through your selected output.</p>
+                </div>
+              </div>
+              <Switch bind:checked={monitorEnabled} disabled={audioMode === 'off' || saving || restarting} />
+            </div>
+
+            <div class="mt-5 space-y-2">
+              <Label class="text-sm text-[#cfcfcf]">Playback output</Label>
+              <select
+                class="h-11 w-full border border-[#3a3a3a] bg-[#242424] px-3 text-sm text-white outline-none focus:border-[#76b900] disabled:opacity-50"
+                bind:value={monitorOutputNode}
+                disabled={!monitorEnabled}
+              >
+                <option value="">System Default</option>
+                {#each status?.audioSinks ?? [] as sink}
+                  <option value={sink.nodeName}>{sink.description}{sink.default ? ' · Default' : ''}</option>
+                {/each}
+              </select>
+            </div>
+
+            {#if monitorEnabled}
+              <p class="mt-4 border-l-2 border-[#d69e2e] pl-3 text-sm leading-relaxed text-[#d8bd76]">
+                Self hearing keeps microphone capture active. Use headphones to prevent acoustic feedback.
+              </p>
+            {/if}
           </div>
           {#if audioMode === 'off'}
             <p class="mt-6 text-sm text-[#aaa]">Both effects are off. NV-X Microphone will not be published.</p>

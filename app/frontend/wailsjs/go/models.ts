@@ -52,6 +52,8 @@ export namespace config {
 	export class AudioConfig {
 	    Mode: string;
 	    InputNode: string;
+	    MonitorEnabled: boolean;
+	    MonitorOutputNode: string;
 	    DereverbDenoiserIntensity: number;
 	    SDKPath: string;
 	    OutputNodeName: string;
@@ -65,6 +67,8 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Mode = source["Mode"];
 	        this.InputNode = source["InputNode"];
+	        this.MonitorEnabled = source["MonitorEnabled"];
+	        this.MonitorOutputNode = source["MonitorOutputNode"];
 	        this.DereverbDenoiserIntensity = source["DereverbDenoiserIntensity"];
 	        this.SDKPath = source["SDKPath"];
 	        this.OutputNodeName = source["OutputNodeName"];
@@ -374,6 +378,7 @@ export namespace main {
 	    fx: fx.Snapshot;
 	    audio: audio.Snapshot;
 	    audioSources: audio.Source[];
+	    audioSinks: audio.Source[];
 
 	    static createFrom(source: any = {}) {
 	        return new AppStatus(source);
@@ -394,6 +399,7 @@ export namespace main {
 	        this.fx = this.convertValues(source["fx"], fx.Snapshot);
 	        this.audio = this.convertValues(source["audio"], audio.Snapshot);
 	        this.audioSources = this.convertValues(source["audioSources"], audio.Source);
+	        this.audioSinks = this.convertValues(source["audioSinks"], audio.Source);
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -507,6 +513,8 @@ export namespace main {
 	    audioMode: string;
 	    audioInputNode: string;
 	    audioIntensity: number;
+	    monitorEnabled: boolean;
+	    monitorOutputNode: string;
 	    lightEnabled: boolean;
 	    lightAddress: string;
 	    lightBrightness: number;
@@ -527,6 +535,8 @@ export namespace main {
 	        this.audioMode = source["audioMode"];
 	        this.audioInputNode = source["audioInputNode"];
 	        this.audioIntensity = source["audioIntensity"];
+	        this.monitorEnabled = source["monitorEnabled"];
+	        this.monitorOutputNode = source["monitorOutputNode"];
 	        this.lightEnabled = source["lightEnabled"];
 	        this.lightAddress = source["lightAddress"];
 	        this.lightBrightness = source["lightBrightness"];

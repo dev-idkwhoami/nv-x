@@ -43,19 +43,21 @@ type ConfigView struct {
 }
 
 type UserSettings struct {
-	CameraInput      string  `json:"cameraInput"`
-	Mode             string  `json:"mode"`
-	AudioMode        string  `json:"audioMode"`
-	AudioInputNode   string  `json:"audioInputNode"`
-	AudioIntensity   float64 `json:"audioIntensity"`
-	LightEnabled     bool    `json:"lightEnabled"`
-	LightAddress     string  `json:"lightAddress"`
-	LightBrightness  int     `json:"lightBrightness"`
-	LightTemperature int     `json:"lightTemperature"`
-	BlurStrength     float64 `json:"blurStrength"`
-	ChromaColor      string  `json:"chromaColor"`
-	BackgroundImage  string  `json:"backgroundImage"`
-	Theme            string  `json:"theme"`
+	CameraInput       string  `json:"cameraInput"`
+	Mode              string  `json:"mode"`
+	AudioMode         string  `json:"audioMode"`
+	AudioInputNode    string  `json:"audioInputNode"`
+	AudioIntensity    float64 `json:"audioIntensity"`
+	MonitorEnabled    bool    `json:"monitorEnabled"`
+	MonitorOutputNode string  `json:"monitorOutputNode"`
+	LightEnabled      bool    `json:"lightEnabled"`
+	LightAddress      string  `json:"lightAddress"`
+	LightBrightness   int     `json:"lightBrightness"`
+	LightTemperature  int     `json:"lightTemperature"`
+	BlurStrength      float64 `json:"blurStrength"`
+	ChromaColor       string  `json:"chromaColor"`
+	BackgroundImage   string  `json:"backgroundImage"`
+	Theme             string  `json:"theme"`
 }
 
 type LoopbackView struct {
@@ -88,6 +90,7 @@ type AppStatus struct {
 	FX                   fx.Snapshot      `json:"fx"`
 	Audio                audio.Snapshot   `json:"audio"`
 	AudioSources         []audio.Source   `json:"audioSources"`
+	AudioSinks           []audio.Source   `json:"audioSinks"`
 }
 
 func NewApp() *App {
@@ -128,6 +131,7 @@ func (a *App) GetStatus() AppStatus {
 		}
 	}
 	audioSources, _ := audio.ListSources(ctx, cfg.Audio.OutputNodeName)
+	audioSinks, _ := audio.ListSinks(ctx)
 
 	return AppStatus{
 		Devices:              devs,
@@ -149,6 +153,7 @@ func (a *App) GetStatus() AppStatus {
 		FX:                   fxSnapshot,
 		Audio:                audioSnapshot,
 		AudioSources:         audioSources,
+		AudioSinks:           audioSinks,
 	}
 }
 
@@ -250,6 +255,8 @@ func (a *App) SaveUserSettings(settings UserSettings) ActionResult {
 	cfg.Audio.Mode = settings.AudioMode
 	cfg.Audio.InputNode = strings.TrimSpace(settings.AudioInputNode)
 	cfg.Audio.DereverbDenoiserIntensity = settings.AudioIntensity
+	cfg.Audio.MonitorEnabled = settings.MonitorEnabled
+	cfg.Audio.MonitorOutputNode = strings.TrimSpace(settings.MonitorOutputNode)
 	cfg.FX.BlurStrength = settings.BlurStrength
 	cfg.FX.ChromaColor = settings.ChromaColor
 	cfg.FX.BackgroundImage = strings.TrimSpace(settings.BackgroundImage)

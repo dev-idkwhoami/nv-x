@@ -38,6 +38,8 @@ Default mode is `/dev/video0` `NV12` `1920x1080 @ 50fps` into `/dev/video10` `YU
 - Optional Elgato ring light auto-control when the virtual camera has consumers.
 - Maxine still-image validation commands.
 - One optional PipeWire virtual microphone with mutually exclusive dereverb/denoise and Studio Voice effects.
+- Demand-driven microphone capture: the virtual source remains available, while the physical microphone and AFX processing connect only when an application reads from it.
+- Optional processed self-hearing routed to a selected PipeWire output; enabling it intentionally keeps microphone capture and AFX processing active. Headphones are recommended to avoid feedback.
 - Camera and microphone selection in the GUI; an empty audio input follows the PipeWire system default.
 
 ## Dependencies

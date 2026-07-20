@@ -51,20 +51,20 @@ type pactlSource struct {
 	State       string `json:"state"`
 }
 
-func ListSources(ctx context.Context, exclude string) ([]Source, error) {
-	defaultOut, _ := exec.CommandContext(ctx, "pactl", "get-default-source").Output()
+func listPactlDevices(ctx context.Context, kind, defaultCommand, exclude string) ([]Source, error) {
+	defaultOut, _ := exec.CommandContext(ctx, "pactl", defaultCommand).Output()
 	defaultName := strings.TrimSpace(string(defaultOut))
-	out, err := exec.CommandContext(ctx, "pactl", "-f", "json", "list", "sources").Output()
+	out, err := exec.CommandContext(ctx, "pactl", "-f", "json", "list", kind).Output()
 	if err != nil {
-		return nil, fmt.Errorf("list PipeWire sources through pactl: %w", err)
+		return nil, fmt.Errorf("list PipeWire %s through pactl: %w", kind, err)
 	}
 	var raw []pactlSource
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, fmt.Errorf("decode PipeWire sources: %w", err)
+		return nil, fmt.Errorf("decode PipeWire %s: %w", kind, err)
 	}
 	result := make([]Source, 0, len(raw))
 	for _, item := range raw {
-		if item.Name == "" || item.Name == exclude || strings.HasSuffix(item.Name, ".monitor") {
+		if item.Name == "" || item.Name == exclude || (kind == "sources" && strings.HasSuffix(item.Name, ".monitor")) {
 			continue
 		}
 		result = append(result, Source{
@@ -79,6 +79,14 @@ func ListSources(ctx context.Context, exclude string) ([]Source, error) {
 		return strings.ToLower(result[i].Description) < strings.ToLower(result[j].Description)
 	})
 	return result, nil
+}
+
+func ListSources(ctx context.Context, exclude string) ([]Source, error) {
+	return listPactlDevices(ctx, "sources", "get-default-source", exclude)
+}
+
+func ListSinks(ctx context.Context) ([]Source, error) {
+	return listPactlDevices(ctx, "sinks", "get-default-sink", "")
 }
 
 func DefaultStatePath() (string, error) {
@@ -231,6 +239,12 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			"--output-node", s.cfg.Audio.OutputNodeName, "--output-description", s.cfg.Audio.OutputDescription}
 		if s.cfg.Audio.InputNode != "" {
 			args = append(args, "--input-node", s.cfg.Audio.InputNode)
+		}
+		if s.cfg.Audio.MonitorEnabled {
+			args = append(args, "--monitor", "true")
+			if s.cfg.Audio.MonitorOutputNode != "" {
+				args = append(args, "--monitor-output-node", s.cfg.Audio.MonitorOutputNode)
+			}
 		}
 		cmd := exec.CommandContext(ctx, helper, args...)
 		cmd.Env = helperEnv(s.cfg)

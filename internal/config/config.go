@@ -24,6 +24,8 @@ type Config struct {
 type AudioConfig struct {
 	Mode                      string
 	InputNode                 string
+	MonitorEnabled            bool
+	MonitorOutputNode         string
 	DereverbDenoiserIntensity float64
 	SDKPath                   string
 	OutputNodeName            string
@@ -112,6 +114,8 @@ func Default() Config {
 		Audio: AudioConfig{
 			Mode:                      "off",
 			InputNode:                 "",
+			MonitorEnabled:            false,
+			MonitorOutputNode:         "",
 			DereverbDenoiserIntensity: 0.90,
 			SDKPath:                   "/usr/local/AudioFX",
 			OutputNodeName:            "nv-x-microphone",
@@ -200,6 +204,8 @@ func Render(c Config) string {
 	fmt.Fprintf(&b, "[audio]\n")
 	fmt.Fprintf(&b, "mode = %q\n", c.Audio.Mode)
 	fmt.Fprintf(&b, "input_node = %q\n", c.Audio.InputNode)
+	fmt.Fprintf(&b, "monitor_enabled = %t\n", c.Audio.MonitorEnabled)
+	fmt.Fprintf(&b, "monitor_output_node = %q\n", c.Audio.MonitorOutputNode)
 	fmt.Fprintf(&b, "dereverb_denoiser_intensity = %.2f\n", c.Audio.DereverbDenoiserIntensity)
 	fmt.Fprintf(&b, "sdk_path = %q\n", c.Audio.SDKPath)
 	fmt.Fprintf(&b, "output_node_name = %q\n", c.Audio.OutputNodeName)
@@ -368,6 +374,14 @@ func assign(cfg *Config, section, key, raw string) error {
 	case "audio.input_node":
 		v, err := parseString(raw)
 		cfg.Audio.InputNode = v
+		return err
+	case "audio.monitor_enabled":
+		v, err := strconv.ParseBool(raw)
+		cfg.Audio.MonitorEnabled = v
+		return err
+	case "audio.monitor_output_node":
+		v, err := parseString(raw)
+		cfg.Audio.MonitorOutputNode = v
 		return err
 	case "audio.dereverb_denoiser_intensity":
 		v, err := strconv.ParseFloat(raw, 64)

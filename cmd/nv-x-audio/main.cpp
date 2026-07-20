@@ -1,4 +1,5 @@
 #include <pipewire/pipewire.h>
+#include <pipewire/link.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/props.h>
 
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_set>
 
 namespace {
 constexpr uint32_t kRate = 48000;
@@ -31,6 +33,8 @@ struct Options {
   std::string inputNode;
   std::string outputNode = "nv-x-microphone";
   std::string outputDescription = "NV-X Microphone";
+  bool monitor = false;
+  std::string monitorOutputNode;
   float intensity = 0.90f;
 };
 
@@ -53,6 +57,8 @@ Options parse(int argc, char **argv) {
     else if (key == "--input-node") o.inputNode = value;
     else if (key == "--output-node") o.outputNode = value;
     else if (key == "--output-description") o.outputDescription = value;
+    else if (key == "--monitor") o.monitor = value == "true";
+    else if (key == "--monitor-output-node") o.monitorOutputNode = value;
     else if (key == "--intensity") o.intensity = std::stof(value);
     else if (key == "--sdk-path") { /* library resolution is handled by the launcher */ }
     else throw std::runtime_error("unknown option " + key);
@@ -120,6 +126,9 @@ class Ring {
   size_t size() const {
     return write_.load(std::memory_order_acquire) - read_.load(std::memory_order_acquire);
   }
+  void discard() {
+    read_.store(write_.load(std::memory_order_acquire), std::memory_order_release);
+  }
  private:
   std::array<float, kRingSamples> data_{};
   std::atomic<size_t> read_{0}, write_{0};
@@ -129,11 +138,22 @@ struct Runtime {
   pw_main_loop *loop = nullptr;
   pw_stream *capture = nullptr;
   pw_stream *source = nullptr;
-  Ring input, output;
+  pw_stream *monitor = nullptr;
+  pw_registry *registry = nullptr;
+  spa_hook registryListener{};
+  Ring input, output, monitorOutput;
   std::atomic<bool> running{true};
+  std::atomic<bool> consumerActive{false};
+  std::atomic<bool> virtualConsumerActive{false};
+  std::atomic<bool> monitorActive{false};
+  std::atomic<bool> resetRequested{false};
   std::atomic<uint64_t> overflows{0}, underflows{0};
+  bool captureConnected = false;
+  std::unordered_set<uint32_t> consumerLinks;
   Effect *effect = nullptr;
 };
+
+void connectStream(pw_stream *stream, pw_direction direction);
 
 void captureProcess(void *userdata) {
   auto *r = static_cast<Runtime *>(userdata);
@@ -169,6 +189,81 @@ void sourceProcess(void *userdata) {
   pw_stream_queue_buffer(r->source, pb);
 }
 
+void monitorProcess(void *userdata) {
+  auto *r = static_cast<Runtime *>(userdata);
+  pw_buffer *pb = pw_stream_dequeue_buffer(r->monitor);
+  if (!pb) return;
+  spa_buffer *b = pb->buffer;
+  if (b->n_datas == 0 || !b->datas[0].data) { pw_stream_queue_buffer(r->monitor, pb); return; }
+  auto *dst = static_cast<float *>(b->datas[0].data);
+  size_t count = b->datas[0].maxsize / sizeof(float);
+  if (pb->requested) count = std::min(count, static_cast<size_t>(pb->requested));
+  const size_t got = r->monitorOutput.pop(dst, count);
+  if (got < count) std::fill(dst + got, dst + count, 0.0f);
+  b->datas[0].chunk->offset = 0;
+  b->datas[0].chunk->stride = sizeof(float);
+  b->datas[0].chunk->size = count * sizeof(float);
+  pw_stream_queue_buffer(r->monitor, pb);
+}
+
+void setConsumerActive(Runtime *r, bool active) {
+  if (r->consumerActive.exchange(active) == active) return;
+  r->resetRequested = true;
+
+  if (active && !r->captureConnected) {
+    try {
+      connectStream(r->capture, PW_DIRECTION_INPUT);
+      r->captureConnected = true;
+      std::fprintf(stdout, "audio_capture=active\n");
+      std::fflush(stdout);
+    } catch (const std::exception &e) {
+      std::fprintf(stderr, "microphone activation failed: %s\n", e.what());
+      r->running = false;
+      pw_main_loop_quit(r->loop);
+    }
+  } else if (!active && r->captureConnected) {
+    const int rc = pw_stream_disconnect(r->capture);
+    if (rc < 0) std::fprintf(stderr, "microphone deactivation failed: %d\n", rc);
+    r->captureConnected = false;
+    std::fprintf(stdout, "audio_capture=inactive\n");
+    std::fflush(stdout);
+  }
+}
+
+void updateCaptureDemand(Runtime *r) {
+  setConsumerActive(r, r->virtualConsumerActive.load() || r->monitorActive.load());
+}
+
+void registryGlobal(void *userdata, uint32_t id, uint32_t, const char *type, uint32_t,
+                    const spa_dict *props) {
+  auto *r = static_cast<Runtime *>(userdata);
+  if (!type || std::strcmp(type, PW_TYPE_INTERFACE_Link) != 0 || !props) return;
+  const char *outputNode = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_NODE);
+  if (!outputNode) return;
+  char *end = nullptr;
+  const unsigned long node = std::strtoul(outputNode, &end, 10);
+  if (!end || *end != '\0' || node != pw_stream_get_node_id(r->source)) return;
+  r->consumerLinks.insert(id);
+  r->virtualConsumerActive = true;
+  updateCaptureDemand(r);
+}
+
+void registryGlobalRemove(void *userdata, uint32_t id) {
+  auto *r = static_cast<Runtime *>(userdata);
+  if (r->consumerLinks.erase(id) == 0) return;
+  r->virtualConsumerActive = !r->consumerLinks.empty();
+  updateCaptureDemand(r);
+}
+
+void monitorStateChanged(void *userdata, pw_stream_state, pw_stream_state state, const char *error) {
+  auto *r = static_cast<Runtime *>(userdata);
+  if (state == PW_STREAM_STATE_ERROR) {
+    std::fprintf(stderr, "self hearing stream failed: %s\n", error ? error : "unknown error");
+  }
+  r->monitorActive = state == PW_STREAM_STATE_STREAMING;
+  updateCaptureDemand(r);
+}
+
 void quit(void *userdata, int) {
   auto *r = static_cast<Runtime *>(userdata);
   r->running = false;
@@ -176,7 +271,20 @@ void quit(void *userdata, int) {
 }
 
 const pw_stream_events captureEvents = {.version = PW_VERSION_STREAM_EVENTS, .process = captureProcess};
-const pw_stream_events sourceEvents = {.version = PW_VERSION_STREAM_EVENTS, .process = sourceProcess};
+const pw_stream_events sourceEvents = {
+    .version = PW_VERSION_STREAM_EVENTS,
+    .process = sourceProcess,
+};
+const pw_stream_events monitorEvents = {
+    .version = PW_VERSION_STREAM_EVENTS,
+    .state_changed = monitorStateChanged,
+    .process = monitorProcess,
+};
+const pw_registry_events registryEvents = {
+    .version = PW_VERSION_REGISTRY_EVENTS,
+    .global = registryGlobal,
+    .global_remove = registryGlobalRemove,
+};
 
 void connectStream(pw_stream *stream, pw_direction direction) {
   uint8_t buffer[1024];
@@ -214,15 +322,48 @@ void runLive(const Options &o) {
       PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Communication",
       PW_KEY_MEDIA_CLASS, "Audio/Source", PW_KEY_NODE_NAME, o.outputNode.c_str(),
       PW_KEY_NODE_DESCRIPTION, o.outputDescription.c_str(), PW_KEY_NODE_VIRTUAL, "true", nullptr);
+  pw_properties_set(sourceProps, PW_KEY_NODE_PAUSE_ON_IDLE, "true");
+  pw_properties_set(sourceProps, PW_KEY_NODE_PASSIVE, "true");
   r.source = pw_stream_new_simple(pw_main_loop_get_loop(r.loop), o.outputDescription.c_str(), sourceProps, &sourceEvents, &r);
   if (!r.capture || !r.source) throw std::runtime_error("pw_stream_new_simple failed");
-  connectStream(r.capture, PW_DIRECTION_INPUT);
   connectStream(r.source, PW_DIRECTION_OUTPUT);
+
+  if (o.monitor) {
+    pw_properties *monitorProps = pw_properties_new(
+        PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback",
+        PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_NODE_NAME, "nv-x-self-hearing",
+        PW_KEY_NODE_DESCRIPTION, "NV-X Self Hearing", nullptr);
+    if (!o.monitorOutputNode.empty())
+      pw_properties_set(monitorProps, PW_KEY_TARGET_OBJECT, o.monitorOutputNode.c_str());
+    r.monitor = pw_stream_new_simple(pw_main_loop_get_loop(r.loop), "NV-X Self Hearing",
+                                     monitorProps, &monitorEvents, &r);
+    if (!r.monitor) throw std::runtime_error("self hearing stream creation failed");
+    connectStream(r.monitor, PW_DIRECTION_OUTPUT);
+  }
+  pw_core *core = pw_stream_get_core(r.source);
+  if (!core) throw std::runtime_error("pw_stream_get_core failed");
+  r.registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+  if (!r.registry) throw std::runtime_error("pw_core_get_registry failed");
+  if (pw_registry_add_listener(r.registry, &r.registryListener, &registryEvents, &r) < 0)
+    throw std::runtime_error("pw_registry_add_listener failed");
 
   std::thread worker([&]() {
     std::array<float, kFrameSamples> input{}, output{};
     while (r.running.load()) {
-      if (r.input.size() < kFrameSamples || r.output.size() > kRingSamples - kFrameSamples) {
+      if (r.resetRequested.exchange(false)) {
+        r.input.discard();
+        r.output.discard();
+        r.monitorOutput.discard();
+      }
+      if (!r.consumerActive.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        continue;
+      }
+      const bool virtualActive = r.virtualConsumerActive.load();
+      const bool monitorActive = r.monitorActive.load();
+      if (r.input.size() < kFrameSamples ||
+          (virtualActive && r.output.size() > kRingSamples - kFrameSamples) ||
+          (monitorActive && r.monitorOutput.size() > kRingSamples - kFrameSamples)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         continue;
       }
@@ -232,7 +373,9 @@ void runLive(const Options &o) {
         std::fprintf(stderr, "audio processing failed: %s\n", e.what());
         std::fill(output.begin(), output.end(), 0.0f);
       }
-      if (r.output.push(output.data(), output.size()) != output.size()) r.overflows++;
+      if (!r.consumerActive.load()) continue;
+      if (virtualActive && r.output.push(output.data(), output.size()) != output.size()) r.overflows++;
+      if (monitorActive && r.monitorOutput.push(output.data(), output.size()) != output.size()) r.overflows++;
     }
   });
   std::fprintf(stdout, "audio_state=active\noutput_node=%s\n", o.outputNode.c_str());
@@ -240,8 +383,13 @@ void runLive(const Options &o) {
   pw_main_loop_run(r.loop);
   r.running = false;
   worker.join();
-  pw_stream_destroy(r.capture);
+  spa_hook_remove(&r.registryListener);
+  pw_proxy_destroy(reinterpret_cast<pw_proxy *>(r.registry));
+  if (r.monitor) pw_stream_destroy(r.monitor);
   pw_stream_destroy(r.source);
+  r.source = nullptr;
+  if (r.captureConnected) pw_stream_disconnect(r.capture);
+  pw_stream_destroy(r.capture);
   pw_main_loop_destroy(r.loop);
   pw_deinit();
   std::fprintf(stderr, "audio counters: overflows=%llu underflows=%llu\n",
